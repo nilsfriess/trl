@@ -1,0 +1,17 @@
+@PACKAGE_INIT@
+
+include(CMakeFindDependencyMacro)
+
+# Find IntelSYCL but don't link it (users must call add_sycl_to_target)
+if(NOT TARGET IntelSYCL::IntelSYCL)
+    find_dependency(IntelSYCL CONFIG REQUIRED)
+endif()
+
+# Find oneMath which is transitively linked
+if(NOT TARGET ONEMATH::onemath)
+    find_dependency(oneMath REQUIRED)
+endif()
+
+include("${CMAKE_CURRENT_LIST_DIR}/trlTargets.cmake")
+
+check_required_components(trl)
