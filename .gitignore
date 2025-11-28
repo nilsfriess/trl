@@ -1,0 +1,6 @@
+build/
+optbuild/
+.idea/
+
+# Ignore emacs files
+*~
