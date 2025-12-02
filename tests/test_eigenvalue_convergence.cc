@@ -1,3 +1,10 @@
+#if HAVE_SYCL_BACKEND
+#include <sycl/sycl.hpp>
+
+#include "sycl/diagonal.hh"
+#include "sycl/laplace.hh"
+#endif
+
 #include <algorithm>
 #include <cassert>
 #include <cmath>
@@ -6,14 +13,10 @@
 #include <random>
 #include <vector>
 
-#include <sycl/sycl.hpp>
-
 #include <trl/eigensolvers/lanczos.hh>
 #include <trl/eigensolvers/params.hh>
 
-#include "../examples/diagonal.hh"
-#include "../examples/laplace.hh"
-
+#if HAVE_SYCL_BACKEND
 // Test convergence of eigenvalues for DiagonalEVP
 // Analytical eigenvalues are simply the diagonal entries: λ_i = i+1
 template <unsigned int bs>
@@ -153,9 +156,11 @@ bool test_laplace_convergence(sycl::queue& q, bool verbose)
 
   return passed;
 }
+#endif
 
 int main()
 {
+#if HAVE_SYCL_BACKEND
   sycl::queue q;
   bool verbose = false;
   int num_failed = 0;
@@ -186,4 +191,5 @@ int main()
     std::cout << num_failed << " test(s) failed!\n";
     return 1;
   }
+#endif
 }

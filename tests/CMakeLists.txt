@@ -1,17 +1,22 @@
-add_executable(test_diagonal_orthonormalize test_diagonal_orthonormalize.cc)
-target_include_directories(test_diagonal_orthonormalize PRIVATE ../include ../examples)
-target_link_libraries(test_diagonal_orthonormalize PRIVATE ONEMATH::onemath)
-add_sycl_to_target(TARGET test_diagonal_orthonormalize SOURCES test_diagonal_orthonormalize.cc)
-add_test(NAME test_diagonal_orthonormalize COMMAND test_diagonal_orthonormalize)
+set(TESTS
+    test_diagonal_orthonormalize
+    test_lanczos_extend
+    test_eigenvalue_convergence
+)
 
-add_executable(test_lanczos_extend test_lanczos_extend.cc)
-target_include_directories(test_lanczos_extend PRIVATE ../include ../examples)
-target_link_libraries(test_lanczos_extend PRIVATE ONEMATH::onemath)
-add_sycl_to_target(TARGET test_lanczos_extend SOURCES test_lanczos_extend.cc)
-add_test(NAME test_lanczos_extend COMMAND test_lanczos_extend)
+foreach(t ${TESTS})
+    add_executable(${t} ${t}.cc)
+    target_include_directories(${t} PRIVATE ../include ../examples)
 
-add_executable(test_eigenvalue_convergence test_eigenvalue_convergence.cc)
-target_include_directories(test_eigenvalue_convergence PRIVATE ../include ../examples)
-target_link_libraries(test_eigenvalue_convergence PRIVATE ONEMATH::onemath)
-add_sycl_to_target(TARGET test_eigenvalue_convergence SOURCES test_eigenvalue_convergence.cc)
-add_test(NAME test_eigenvalue_convergence COMMAND test_eigenvalue_convergence)
+    if(${WITH_SYCL_BACKEND})
+      target_link_libraries(${t} PRIVATE ONEMATH::onemath)
+      add_sycl_to_target(TARGET ${t} SOURCES ${t}.cc)
+      target_compile_definitions(${t} PUBLIC WITH_SYCL_BACKEND)
+    endif()
+
+    if(${WITH_CUDA_BACKEND})
+      target_compile_definitions(${t} PUBLIC WITH_CUDA_BACKEND)
+    endif()
+    
+    add_test(NAME ${t} COMMAND ${t})
+endforeach()

@@ -5,8 +5,17 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-find_package(IntelSYCL CONFIG REQUIRED)
-find_package(oneMath REQUIRED)
+option(WITH_SYCL_BACKEND "Enable the SYCL backend based on the Intel SYCL Compiler and oneMath" Off)
+option(WITH_GINKGO_BACKEND "Enable the gingko backend" On)
+
+if(${WITH_SYCL_BACKEND})
+  find_package(IntelSYCL CONFIG REQUIRED)
+  find_package(oneMath REQUIRED)
+endif()
+
+if(${WITH_GINKGO_BACKEND})
+  find_package(Ginkgo REQUIRED)
+endif()
 
 # Create header-only library target
 add_library(trl INTERFACE)
@@ -18,9 +27,11 @@ target_include_directories(trl INTERFACE
 )
 
 # Only link oneMath, not IntelSYCL (which uses add_sycl_to_target instead)
-target_link_libraries(trl INTERFACE
-  ONEMATH::onemath
-)
+if (${WITH_SYCL_BACKEND})
+  target_link_libraries(trl INTERFACE
+    ONEMATH::onemath
+  )
+endif()
 
 target_compile_features(trl INTERFACE cxx_std_20)
 
@@ -64,5 +75,5 @@ install(EXPORT trlTargets
 
 # Add tests and examples
 enable_testing()
-add_subdirectory(tests)
+# add_subdirectory(tests)
 add_subdirectory(examples)

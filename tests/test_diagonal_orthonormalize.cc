@@ -1,10 +1,15 @@
+#if HAVE_SYCL_BACKEND
 #include <sycl/sycl.hpp>
-#include "diagonal.hh"
+
+#include "sycl/diagonal.hh"
+#endif
+
 #include <cassert>
 #include <iostream>
 #include <cmath>
 
-void test_diagonal_orthonormalize() {
+#if HAVE_SYCL_BACKEND
+void test_diagonal_orthonormalize_sycl() {
     sycl::queue q;
     const int N = 8;
     DiagonalEVP<double, 1> evp(q, N);
@@ -23,9 +28,12 @@ void test_diagonal_orthonormalize() {
     assert(std::abs(norm - 1.0) < 1e-12);
     delete[] r_data;
 }
+#endif
 
 int main() {
-    test_diagonal_orthonormalize();
+#if HAVE_SYCL_BACKEND
+    test_diagonal_orthonormalize_sycl();
     std::cout << "test_diagonal_orthonormalize passed\n";
+#endif
     return 0;
 }

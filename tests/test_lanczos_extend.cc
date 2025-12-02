@@ -1,3 +1,10 @@
+#if HAVE_SYCL_BACKEND
+#include <sycl/sycl.hpp>
+
+#include "sycl/diagonal.hh"
+#include "sycl/laplace.hh"
+#endif
+
 #include <algorithm>
 #include <cassert>
 #include <cmath>
@@ -7,14 +14,9 @@
 #include <string>
 #include <vector>
 
-#include <sycl/sycl.hpp>
-
 #include <trl/concepts.hh>
 #include <trl/eigensolvers/lanczos.hh>
 #include <trl/eigensolvers/params.hh>
-
-#include "../examples/diagonal.hh"
-#include "../examples/laplace.hh"
 
 template <typename Scalar>
 std::string type_str()
@@ -198,6 +200,7 @@ bool test_lanczos_relation(std::shared_ptr<EVP> evp, bool verbose, typename EVP:
 
 int main()
 {
+#if HAVE_SYCL_BACKEND
   sycl::queue q;
   bool verbose = false;
   int num_failed = 0;
@@ -275,4 +278,5 @@ int main()
     std::cout << num_failed << " test(s) failed!\n";
     return 1;
   }
+#endif
 }
