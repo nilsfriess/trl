@@ -3,6 +3,7 @@
 #include "../concepts.hh"
 #include "trl/eigensolvers/params.hh"
 
+#include <algorithm>
 #include <cassert>
 #include <cmath>
 #include <iostream>
@@ -27,12 +28,14 @@ public:
       // Allocate W with ncv columns to match matrix dimensions
       , T(evp->create_blockmatrix(ncv / blocksize, ncv / blocksize))
       , B(evp->create_blockmatrix(1, 2))
-      , Y(evp->create_blockmatrix(ncv / blocksize, ncv / blocksize))
-      , ritz_values(evp->malloc(ncv))
+  // , Y(evp->create_blockmatrix(ncv / blocksize, ncv / blocksize))
+  // , ritz_values(evp->malloc(ncv))
   {
   }
 
-  ~BlockLanczos() { evp->free(ritz_values); }
+  // ~BlockLanczos() {
+  //   evp->free(ritz_values);
+  // }
 
   /** @brief Solves the eigenvalue problem using thick-restart Lanczos
    */
@@ -56,7 +59,9 @@ public:
       // T.print();
 
       // Solve the small projected system
-      evp->solve_small_dense(T, ritz_values, Y);
+      evp->solve_small_dense(T);
+      const auto& Y = evp->get_current_eigenvectors();
+      const auto& ritz_values = evp->get_current_eigenvalues();
 
       auto converged = check_convergence();
       // Diagnostic: print residual norms for the current Ritz values
@@ -88,8 +93,8 @@ public:
       std::cout << "  Computing " << nev / blocksize << " Ritz vectors from " << ncv / blocksize << " Lanczos vectors\n";
       // First zero out the blocks we'll write to
       for (std::size_t j = 0; j < nev / blocksize; ++j) {
-        auto Wj = W.block_view(j);
-        for (std::size_t idx = 0; idx < Wj.rows() * Wj.cols(); ++idx) Wj.data[idx] = 0;
+        W.block_view(j).set_zero();
+        // for (std::size_t idx = 0; idx < Wj.rows() * Wj.cols(); ++idx) Wj.data[idx] = 0;
       }
       // Now compute the matrix-vector products
       for (std::size_t j = 0; j < nev / blocksize; ++j) {
@@ -105,20 +110,20 @@ public:
 
       std::swap(V, W);
 
-      // Check orthonormality of the restarted basis
-      std::cout << "  Checking orthonormality of first " << nev / blocksize + 1 << " blocks after restart:\n";
-      for (std::size_t i = 0; i <= nev / blocksize; ++i) {
-        auto Vi = V.block_view(i);
-        auto check = evp->create_blockmatrix(1, 1);
-        auto check0 = check.block_view(0, 0);
-        Vi.dot(Vi, check0);
-        Scalar max_offdiag = 0;
-        for (std::size_t r = 0; r < blocksize; ++r) {
-          for (std::size_t c = 0; c < blocksize; ++c)
-            if (r != c) max_offdiag = std::max(max_offdiag, std::abs(check0.data[r * blocksize + c]));
-        }
-        std::cout << "    Block " << i << ": max off-diag = " << max_offdiag << "\n";
-      }
+      // // Check orthonormality of the restarted basis
+      // std::cout << "  Checking orthonormality of first " << nev / blocksize + 1 << " blocks after restart:\n";
+      // for (std::size_t i = 0; i <= nev / blocksize; ++i) {
+      //   auto Vi = V.block_view(i);
+      //   auto check = evp->create_blockmatrix(1, 1);
+      //   auto check0 = check.block_view(0, 0);
+      //   Vi.dot(Vi, check0);
+      //   Scalar max_offdiag = 0;
+      //   for (std::size_t r = 0; r < blocksize; ++r) {
+      //     for (std::size_t c = 0; c < blocksize; ++c)
+      //       if (r != c) max_offdiag = std::max(max_offdiag, std::abs(check0.data[r * blocksize + c]));
+      //   }
+      //   std::cout << "    Block " << i << ": max off-diag = " << max_offdiag << "\n";
+      // }
 
       converged = check_convergence();
       if (converged >= nev) {
@@ -144,23 +149,16 @@ public:
 #endif
 
       // Put the first nev Ritz values on the diagonal of T
-      std::cout << "  Setting T diagonal with first " << nev << " Ritz values:\n  ";
-      for (unsigned int idx = 0; idx < nev; ++idx) {
-        std::cout << ritz_values[idx];
-        if (idx + 1 < nev) std::cout << ", ";
-      }
-      std::cout << "\n";
       for (std::size_t i = 0; i < nev / blocksize; ++i) {
         for (std::size_t j = 0; j < nev / blocksize; ++j) {
           auto Tij = T.block_view(i, j);
           Tij.set_zero();
 
-          if (i == j) Tij.set_diagonal(ritz_values + i * blocksize);
+          if (i == j) Tij.set_diagonal(evp->get_eigenvalues_block(i));
         }
       }
 
-      // Put the "residual block" placeholder into T using cached beta and current Y (last row m-1)
-      // This will be corrected after the manual step using the freshly computed beta_k
+      // Put the "residual block" into T
       for (std::size_t i = 0; i < nev / blocksize; ++i) {
         auto Tki = T.block_view(nev / blocksize, i);
         auto Tik = T.block_view(i, nev / blocksize);
@@ -245,7 +243,7 @@ public:
   /** @brief Return the number of converged eigenvalues */
   unsigned int get_nconv() const { return nconv * blocksize; }
 
-  const auto* get_eigenvalues() const { return ritz_values; }
+  // const auto* get_eigenvalues() const { return ritz_values; }
 
   /** @brief Compute residuals and check if the method has converged
    *
@@ -281,7 +279,9 @@ public:
         // Use max of relative tolerance and scaled epsilon
 
         // TODO: Here we access ritz_values directly, but they live on device, not on host!
-        const Scalar thresh = std::max(tolerance * std::abs(ritz_values[idx]), eps23);
+        const Scalar thresh = std::max(tolerance // * std::abs(ritz_values[idx])
+                                       ,
+                                       eps23);
 
         if (res_norms[idx] > thresh) {
           block_converged = false;
@@ -304,50 +304,94 @@ private:
    *  The residual is the norm of beta (last off-diagonal block) times
    *  the last blocksize elements of the i-th eigenvector.
    */
+  // void compute_residual_norms()
+  // {
+  //   // beta is the last off-diagonal block of T
+  //   auto beta = B.block_view(0, 0); // We stored it in B during extend()
+
+  //   std::cout << "  Computing residuals: beta norm = " << std::sqrt(beta.data[0] * beta.data[0] + beta.data[1] * beta.data[1] + beta.data[2] * beta.data[2] + beta.data[3] * beta.data[3]) << "\n";
+
+  //   // For each eigenvalue we want to check
+  //   for (unsigned int i = nconv * blocksize; i < nev; ++i) {
+  //     // Extract the last blocksize elements of eigenvector i from Y
+  //     // Y is stored as a BlockMatrix with block_rows() x block_cols() blocks
+  //     // We need the elements from the last block row for column i
+
+  //     std::vector<Scalar> last_elements(blocksize);
+  //     std::vector<Scalar> result(blocksize);
+
+  //     // Get the last block row index
+  //     const auto& Y = evp->get_current_eigenvectors();
+  //     const unsigned int last_block_row = Y.block_rows() - 1;
+  //     const unsigned int col_block = i / blocksize;
+
+  //     // Extract last blocksize elements from eigenvector i
+  //     // This is a bit tricky because Y is stored in blocks
+  //     auto Y_block = Y.block_view(last_block_row, col_block);
+  //     const unsigned int col_in_block = i % blocksize;
+
+  //     for (unsigned int j = 0; j < blocksize; ++j) last_elements[j] = Y_block(j, col_in_block);
+
+  //     // Compute beta * last_elements
+  //     beta.mult(last_elements, result);
+
+  //     // Compute norm of result
+  //     Scalar sum_sq = 0;
+  //     for (unsigned int j = 0; j < blocksize; ++j) sum_sq += result[j] * result[j];
+  //     res_norms[i] = std::sqrt(sum_sq);
+
+  //     if (i == 0) {
+  //       std::cout << "    Eigenvalue 0: last_Y = [";
+  //       for (unsigned int j = 0; j < blocksize; ++j) {
+  //         std::cout << last_elements[j];
+  //         if (j + 1 < blocksize) std::cout << ", ";
+  //       }
+  //       std::cout << "], residual = " << res_norms[i] << "\n";
+  //     }
+  //   }
+  // }
   void compute_residual_norms()
   {
-    // beta is the last off-diagonal block of T
-    auto beta = B.block_view(0, 0); // We stored it in B during extend()
+    auto beta = B.block_view(0, 0);
+    auto result = B.block_view(0, 1);
+    const auto& Y = evp->get_current_eigenvectors();
+    const auto& residuals = evp->get_temp_vector(blocksize);
 
-    std::cout << "  Computing residuals: beta norm = " << std::sqrt(beta.data[0] * beta.data[0] + beta.data[1] * beta.data[1] + beta.data[2] * beta.data[2] + beta.data[3] * beta.data[3]) << "\n";
+    for (std::size_t block = 0; block < ncv / blocksize; ++block) {
+      auto Y_block = Y.block_view(Y.block_rows() - 1, block);
+      beta.mult(Y_block, result);
 
-    // For each eigenvalue we want to check
-    for (unsigned int i = nconv * blocksize; i < nev; ++i) {
-      // Extract the last blocksize elements of eigenvector i from Y
-      // Y is stored as a BlockMatrix with block_rows() x block_cols() blocks
-      // We need the elements from the last block row for column i
-
-      std::vector<Scalar> last_elements(blocksize);
-      std::vector<Scalar> result(blocksize);
-
-      // Get the last block row index
-      const unsigned int last_block_row = Y.block_rows() - 1;
-      const unsigned int col_block = i / blocksize;
-
-      // Extract last blocksize elements from eigenvector i
-      // This is a bit tricky because Y is stored in blocks
-      auto Y_block = Y.block_view(last_block_row, col_block);
-      const unsigned int col_in_block = i % blocksize;
-
-      for (unsigned int j = 0; j < blocksize; ++j) last_elements[j] = Y_block(j, col_in_block);
-
-      // Compute beta * last_elements
-      beta.mult(last_elements, result);
-
-      // Compute norm of result
-      Scalar sum_sq = 0;
-      for (unsigned int j = 0; j < blocksize; ++j) sum_sq += result[j] * result[j];
-      res_norms[i] = std::sqrt(sum_sq);
-
-      if (i == 0) {
-        std::cout << "    Eigenvalue 0: last_Y = [";
-        for (unsigned int j = 0; j < blocksize; ++j) {
-          std::cout << last_elements[j];
-          if (j + 1 < blocksize) std::cout << ", ";
-        }
-        std::cout << "], residual = " << res_norms[i] << "\n";
-      }
+      const auto& residuals = evp->two_norm_on_host(result);
+      for (std::size_t j = 0, i = block * blocksize; i < (block + 1) * blocksize; ++i, ++j) res_norms[i] = residuals[j];
     }
+
+    // for (unsigned int i = nconv * blocksize; i < nev; ++i) {
+    //   const unsigned int last_block_row = Y.block_rows() - 1;
+    //   const unsigned int col_block = i / blocksize;
+    //   const unsigned int col_in_block = i % blocksize;
+
+    //   auto Y_block = Y.block_view(last_block_row, col_block);
+
+    //   // Extract column (stays on device for GPU backend)
+    //   Y_block.get_column(col_in_block, last_elements);
+
+    //   // Multiply (on device for GPU backend)
+    //   beta.mult(last_elements, result);
+
+    //   // Compute norm (on device for GPU backend, returns scalar to host)
+    //   res_norms[i] = result.norm();
+
+    //   // Diagnostic (only transfer data when actually printing)
+    //   if (i == 0) {
+    //     auto host_copy = last_elements.to_host();
+    //     std::cout << "    Eigenvalue 0: last_Y = [";
+    //     for (unsigned int j = 0; j < blocksize; ++j) {
+    //       std::cout << host_copy[j];
+    //       if (j + 1 < blocksize) std::cout << ", ";
+    //     }
+    //     std::cout << "], residual = " << res_norms[i] << "\n";
+    //   }
+    // }
   }
 
 public:
@@ -443,9 +487,5 @@ private:
 
   typename BMV::BlockMatrix T; // Block tridiagonal matrix
   typename BMV::BlockMatrix B; // Temp matrix
-
-  // Data for the small eigenproblem, managed by the EVP
-  typename BMV::BlockMatrix Y;
-  typename EVP::Scalar* ritz_values;
 };
 } // namespace trl
