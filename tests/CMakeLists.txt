@@ -14,8 +14,11 @@ foreach(t ${TESTS})
       target_compile_definitions(${t} PUBLIC WITH_SYCL_BACKEND)
     endif()
 
-    if(${WITH_CUDA_BACKEND})
-      target_compile_definitions(${t} PUBLIC WITH_CUDA_BACKEND)
+    if(${WITH_GINKGO_BACKEND})
+      find_package (Eigen3 REQUIRED NO_MODULE)
+
+      target_compile_definitions(${t} PUBLIC WITH_GINKGO_BACKEND)
+      target_link_libraries(${t} Ginkgo::ginkgo Eigen3::Eigen)
     endif()
     
     add_test(NAME ${t} COMMAND ${t})

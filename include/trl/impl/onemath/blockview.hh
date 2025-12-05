@@ -18,6 +18,7 @@ template <class T, std::size_t cols_>
 class BlockView {
 public:
   using EntryType = T;
+  using MatrixBlockView = MatrixBlockView<T, cols_>;
 
   BlockView(sycl::queue* queue, T* data, std::size_t rows)
       : data(data)
@@ -51,19 +52,13 @@ public:
     queue->memcpy(data, source.data, rows_ * cols_ * sizeof(T)).wait();
   }
 
-  void dot(BlockView B, MatrixBlockView<T, cols_> C) { return gemm(*queue, transpose::trans, transpose::nontrans, cols_, cols_, rows_, 1., data, cols_, B.data, cols_, 0., C.data, cols_).wait(); }
+  void dot(BlockView B, MatrixBlockView C) { return gemm(*queue, transpose::trans, transpose::nontrans, cols_, cols_, rows_, 1., data, cols_, B.data, cols_, 0., C.data, cols_).wait(); }
 
-  void mult(MatrixBlockView<T, cols_> B, BlockView C) { return gemm(*queue, transpose::nontrans, transpose::nontrans, rows_, cols_, cols_, 1., data, cols_, B.data, cols_, 0., C.data, cols_).wait(); }
+  void mult(MatrixBlockView B, BlockView C) { return gemm(*queue, transpose::nontrans, transpose::nontrans, rows_, cols_, cols_, 1., data, cols_, B.data, cols_, 0., C.data, cols_).wait(); }
 
-  void mult_add(MatrixBlockView<T, cols_> B, BlockView C)
-  {
-    return gemm(*queue, transpose::nontrans, transpose::nontrans, rows_, cols_, cols_, 1., data, cols_, B.data, cols_, 1., C.data, cols_).wait();
-  }
+  void mult_add(MatrixBlockView B, BlockView C) { return gemm(*queue, transpose::nontrans, transpose::nontrans, rows_, cols_, cols_, 1., data, cols_, B.data, cols_, 1., C.data, cols_).wait(); }
 
-  void mult_transpose(MatrixBlockView<T, cols_> B, BlockView C)
-  {
-    return gemm(*queue, transpose::nontrans, transpose::trans, rows_, cols_, cols_, 1., data, cols_, B.data, cols_, 0., C.data, cols_).wait();
-  }
+  void mult_transpose(MatrixBlockView B, BlockView C) { return gemm(*queue, transpose::nontrans, transpose::trans, rows_, cols_, cols_, 1., data, cols_, B.data, cols_, 0., C.data, cols_).wait(); }
 
   BlockView& operator-=(BlockView B)
   {
@@ -71,10 +66,7 @@ public:
     return *this;
   }
 
-  void subtract_product(BlockView B, MatrixBlockView<T, cols_> C)
-  {
-    gemm(*queue, transpose::nontrans, transpose::nontrans, rows_, cols_, cols_, -1., B.data, cols_, C.data, cols_, 1., data, cols_).wait();
-  }
+  void subtract_product(BlockView B, MatrixBlockView C) { gemm(*queue, transpose::nontrans, transpose::nontrans, rows_, cols_, cols_, -1., B.data, cols_, C.data, cols_, 1., data, cols_).wait(); }
 
   T norm() const
   {
@@ -82,6 +74,8 @@ public:
     oneapi::math::blas::row_major::nrm2(*queue, rows_ * cols_, data, 1, &result).wait();
     return result;
   }
+
+  void set_zero() { queue->memset(data, 0, rows_ * cols_ * sizeof(T)).wait(); }
 
   T& operator()(std::size_t row, std::size_t col) { return data[row * cols_ + col]; }
 

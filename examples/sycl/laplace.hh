@@ -23,6 +23,8 @@ public:
   OneDLaplaceEVP(sycl::queue queue, Index N)
       : queue(queue)
       , N(N)
+      , eigvals(sycl::malloc_shared<T>(N, queue))
+      , eigvecs(queue, N / bs, N / bs)
   {
     Index nnz = (N - 2) * 3 + 2 + 2; // 3 entries in all rows except the first and the last
 
@@ -136,7 +138,7 @@ public:
   T* malloc(std::size_t n) const { return sycl::malloc_shared<T>(n, queue); }
   void free(T* ptr) const { sycl::free(ptr, queue); }
 
-  void solve_small_dense(const typename BlockMultivector::BlockMatrix& B, T* eigvals, typename BlockMultivector::BlockMatrix& eigvecs)
+  void solve_small_dense(const typename BlockMultivector::BlockMatrix& B)
   {
     // B is a block tridiagonal matrix of dimension (block_rows * bs) x (block_cols * bs)
     // We need to compute eigenvalues and eigenvectors of this dense matrix
@@ -206,6 +208,46 @@ public:
     sycl::free(B_dense, queue);
   }
 
+  T* get_current_eigenvalues() const { return eigvals; }
+
+  const typename BlockMultivector::BlockMatrix& get_current_eigenvectors() { return eigvecs; }
+
+  T* get_eigenvalues_block(std::size_t block)
+  {
+    // Return a pointer into the eigenvalues array for the requested block
+    // Each block contains bs eigenvalues
+    return eigvals + block * bs;
+  }
+
+  std::vector<T> get_temp_vector(std::size_t min_size)
+  {
+    if (temp_vector_.size() < min_size) temp_vector_.resize(min_size);
+    return temp_vector_;
+  }
+
+  const std::vector<T>& two_norm_on_host(typename BlockMultivector::BlockMatrix::BlockView B)
+  {
+    // Compute the column-wise 2-norms of the columns in B and return them on the host
+    norms_host.resize(bs);
+
+    auto *bdata = B.data;
+    auto *norms_data = norms_host.data();
+
+    queue
+        .parallel_for(sycl::range<1>(bs), [bdata, norms_data](sycl::id<1> idx) {
+          Index col = idx[0];
+          T sum_sq = 0;
+          for (Index row = 0; row < bs; ++row) {
+            T val = bdata[row * bs + col];
+            sum_sq += val * val;
+          }
+          norms_data[col] = std::sqrt(sum_sq);
+        })
+        .wait();
+
+    return norms_host;
+  }
+
 private:
   sycl::queue queue;
 
@@ -233,6 +275,15 @@ private:
   T* ortho_scratchpad = nullptr;
   std::int64_t ortho_scratchpad_size = 0;
   bool ortho_scratchpad_initialized = false;
+
+  // Current eigenvalues and eigenvectors
+  T* eigvals;
+  typename BlockMultivector::BlockMatrix eigvecs;
+
+  // Temp vector
+  std::vector<T> temp_vector_;
+
+  std::vector<T> norms_host;
 };
 
 } // namespace trl

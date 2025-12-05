@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cassert>
 #include <cmath>
+#include <iomanip>
 #include <iostream>
 #include <limits>
 #include <memory>
@@ -154,7 +155,11 @@ public:
           auto Tij = T.block_view(i, j);
           Tij.set_zero();
 
-          if (i == j) Tij.set_diagonal(evp->get_eigenvalues_block(i));
+          if (i == j) {
+            const auto& evals = evp->get_eigenvalues_block(i);
+            // std::cout << "DEBUG restart: Setting T(" << i << "," << i << ") to eigenvalue " << evals.get_const_data()[0] << "\n";
+            Tij.set_diagonal(evals);
+          }
         }
       }
 
@@ -163,6 +168,7 @@ public:
         auto Tki = T.block_view(nev / blocksize, i);
         auto Tik = T.block_view(i, nev / blocksize);
         auto Xrow = Y.block_view(ncv / blocksize - 1, i); // use last row of Y from current projected problem
+
         B.block_view(0, 0).mult(Xrow, Tki);
         Tik.copy_from_transpose(Tki);
       }
@@ -357,7 +363,7 @@ private:
     const auto& Y = evp->get_current_eigenvectors();
     const auto& residuals = evp->get_temp_vector(blocksize);
 
-    for (std::size_t block = 0; block < ncv / blocksize; ++block) {
+    for (std::size_t block = 0; block < nev / blocksize; ++block) {
       auto Y_block = Y.block_view(Y.block_rows() - 1, block);
       beta.mult(Y_block, result);
 
@@ -424,9 +430,29 @@ public:
       auto V_curr = V.block_view(i);
       auto V_next = V.block_view(i + 1);
 
+      /*  {
+         std::cout << "========================================\n";
+         std::cout << "BEFORE APPLY\n";
+         auto tmp = evp->create_blockmatrix(1, 1);
+         auto norm = tmp.block_view(0, 0);
+         V_curr.data->compute_norm2(norm.data);
+         std::cout << "||V_curr|| = " << norm.data->at(0, 0) << ", ";
+       } */
+
       // Step 1: v_{i+1} = A v_i
       evp->apply(V_curr, V_next);
       n_op_apply++;
+
+      /* {
+        std::cout << "AFTER APPLY\n";
+        auto tmp = evp->create_blockmatrix(1, 1);
+        auto norm = tmp.block_view(0, 0);
+        V_curr.data->compute_norm2(norm.data);
+        std::cout << "||V_curr|| = " << norm.data->at(0, 0) << ", ";
+        V_next.data->compute_norm2(norm.data);
+        std::cout << "||V_next|| = " << norm.data->at(0, 0) << "\n";
+        std::cout << "========================================\n";
+      } */
 
       // Step 2: v_{i+1} -= v_{i-1} * beta_{i-1}^T
       if (i > 0) {

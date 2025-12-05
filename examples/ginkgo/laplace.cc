@@ -1,16 +1,11 @@
 #include <cstdlib>
 #include <iostream>
-#include <map>
-#include <string>
+#include <random>
 #include <vector>
 
-// clang-format off
-#define TODO(msg) do { \
-    /* Emacs compilation buffer format: file:line: message */ \
-    std::cerr << __FILE__ << ":" << __LINE__ << ": TODO in " << __func__ << ": " << msg << std::endl; \
-    std::exit(EXIT_FAILURE); \
-} while(0)
-// clang-format on
+#include <Eigen/Cholesky>
+#include <Eigen/Core>
+#include <Eigen/Eigenvalues>
 
 #include "trl/concepts.hh"
 #include "trl/eigensolvers/lanczos.hh"
@@ -19,57 +14,13 @@
 
 #include <ginkgo/ginkgo.hpp>
 
-template <class T, unsigned int bs>
-class DiagonalEigenproblem {
-public:
-  using Scalar = T;
-  using BlockMultivector = trl::ginkgo::BlockMultivector<T, bs>;
-  using BlockView = typename BlockMultivector::BlockView;
-  using BlockMatrix = typename BlockMultivector::BlockMatrix;
-  using MatrixBlockView = typename BlockMatrix::BlockView;
-  static constexpr unsigned int blocksize = bs;
-
-  DiagonalEigenproblem(std::shared_ptr<const gko::Executor> exec, std::size_t N)
-      : exec_(std::move(exec))
-      , N_(N)
-  {
-  }
-
-  void apply(BlockView x, BlockView y) { TODO("Not implemented"); }
-
-  void dot(BlockView x, BlockView y, MatrixBlockView B) { TODO("Not implemented"); }
-
-  void orthonormalize(BlockView x, MatrixBlockView B) { TODO("Not implemented"); }
-
-  std::size_t size() const { return N_; }
-
-  BlockMultivector create_multivector(std::size_t rows, std::size_t cols) const { return BlockMultivector(exec_, rows, cols); }
-
-  BlockMatrix create_blockmatrix(std::size_t block_rows, std::size_t block_cols) const { return BlockMatrix(exec_, block_rows, block_cols); }
-
-  void solve_small_dense(const BlockMatrix& B) { TODO("Not implemented"); }
-
-  const gko::array<T>& get_current_eigenvalues() const { TODO("Not implemented"); }
-
-  const gko::array<T>& get_eigenvalues_block(std::size_t block) { TODO("Not implemented"); }
-
-  const gko::array<T>& get_temp_vector(std::size_t min_size) { TODO("Not implemented"); }
-
-  const std::vector<T>& two_norm_on_host(MatrixBlockView B) { TODO("Not implemented"); }
-
-  const BlockMatrix& get_current_eigenvectors() const { TODO("Not implemented"); }
-
-private:
-  std::shared_ptr<const gko::Executor> exec_;
-  std::size_t N_;
-};
+#include "laplace.hh"
 
 int main(int argc, char* argv[])
 {
   using Scalar = double;
   constexpr unsigned int bs = 1;
-  std::size_t N = 1024;
-  std::size_t nev = 8;
+  std::size_t N = 4096;
 
   using BMV = trl::ginkgo::BlockMultivector<Scalar, bs>;
   using EVP = DiagonalEigenproblem<Scalar, bs>;
@@ -81,12 +32,33 @@ int main(int argc, char* argv[])
   auto evp = std::make_shared<EVP>(exec, N);
 
   trl::EigensolverParams params{
-      .nev = 9,
+      .nev = 16,
       .ncv = 32,
   };
 
   trl::BlockLanczos lanczos(evp, params);
+
+  // Initialise first block randomly
+  {
+    auto V0 = lanczos.get_basis().block_view(0);
+    std::mt19937 gen(42);
+    std::normal_distribution<Scalar> dist(0.0, 1.0);
+    for (std::size_t i = 0; i < V0.rows(); ++i)
+      for (std::size_t j = 0; j < V0.cols(); ++j) V0.data->get_values()[i * V0.cols() + j] = dist(gen);
+    // Orthonormalize
+    // auto R = evp->create_blockmatrix(bs, bs);
+    // auto Rview = R.block_view(0, 0);
+    // evp->orthonormalize(V0, Rview);
+  }
+
   lanczos.solve();
+
+  exec->synchronize();
+
+  // Print out the computed eigenvalues
+  const auto& eigvals = evp->get_current_eigenvalues();
+  std::cout << "Computed eigenvalues:\n";
+  for (std::size_t i = 0; i < params.nev; ++i) std::cout << "  " << eigvals.get_const_data()[i] << "\n";
 
   // // Some shortcuts
   // using ValueType = double;

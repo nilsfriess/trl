@@ -75,5 +75,5 @@ install(EXPORT trlTargets
 
 # Add tests and examples
 enable_testing()
-# add_subdirectory(tests)
+add_subdirectory(tests)
 add_subdirectory(examples)
