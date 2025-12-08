@@ -230,19 +230,20 @@ public:
     // Compute the column-wise 2-norms of the columns in B and return them on the host
     norms_host.resize(bs);
 
-    auto *bdata = B.data;
-    auto *norms_data = norms_host.data();
+    auto* bdata = B.data;
+    auto* norms_data = norms_host.data();
 
     queue
-        .parallel_for(sycl::range<1>(bs), [bdata, norms_data](sycl::id<1> idx) {
-          Index col = idx[0];
-          T sum_sq = 0;
-          for (Index row = 0; row < bs; ++row) {
-            T val = bdata[row * bs + col];
-            sum_sq += val * val;
-          }
-          norms_data[col] = std::sqrt(sum_sq);
-        })
+        .parallel_for(sycl::range<1>(bs),
+                      [bdata, norms_data](sycl::id<1> idx) {
+                        Index col = idx[0];
+                        T sum_sq = 0;
+                        for (Index row = 0; row < bs; ++row) {
+                          T val = bdata[row * bs + col];
+                          sum_sq += val * val;
+                        }
+                        norms_data[col] = std::sqrt(sum_sq);
+                      })
         .wait();
 
     return norms_host;

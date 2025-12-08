@@ -1,84 +1,15 @@
-#if WITH_SYCL_BACKEND
-#include <sycl/sycl.hpp>
-
-#include "sycl/diagonal.hh"
-#include "sycl/laplace.hh"
-#endif
-
-#if WITH_GINKGO_BACKEND
-#include "ginkgo/laplace.hh"
-
-#include <ginkgo/ginkgo.hpp>
-#endif
-
 #include <algorithm>
 #include <cassert>
 #include <cmath>
 #include <iostream>
 #include <memory>
 #include <random>
-#include <string>
+
+#include "helpers.hh"
 
 #include <trl/concepts.hh>
 #include <trl/eigensolvers/lanczos.hh>
 #include <trl/eigensolvers/params.hh>
-
-template <typename Scalar>
-std::string type_str()
-{
-  if constexpr (std::is_same_v<Scalar, double>) return "double";
-  else if constexpr (std::is_same_v<Scalar, float>) return "float";
-  else return "unknown";
-}
-
-// Helper to verify orthogonality of V blocks
-template <trl::Eigenproblem EVP>
-void check_orthogonality(std::shared_ptr<EVP> evp, typename EVP::BlockMultivector& V, unsigned int num_blocks, bool verbose)
-{
-  using Scalar = typename EVP::Scalar;
-  constexpr auto bs = EVP::blocksize;
-
-  if (!verbose) return;
-
-  std::cout << "  Checking orthogonality of V blocks..." << std::endl;
-  Scalar max_offdiag = 0;
-  Scalar max_diag_error = 0;
-
-  auto temp = evp->create_blockmatrix(1, 1);
-  auto temp_block = temp.block_view(0, 0);
-
-  for (unsigned int i = 0; i < num_blocks; ++i) {
-    auto Vi = V.block_view(i);
-
-    // Check V_i^T * V_i = I
-    Vi.dot(Vi, temp_block);
-    for (unsigned int r = 0; r < bs; ++r) {
-      for (unsigned int c = 0; c < bs; ++c) {
-#if WITH_SYCL_BACKEND
-        Scalar val = temp_block.data[r * bs + c];
-#elif WITH_GINKGO_BACKEND
-        auto val = temp_block.data->at(r, c);
-#endif
-        if (r == c) max_diag_error = std::max(max_diag_error, std::abs(val - Scalar(1.0)));
-        else max_offdiag = std::max(max_offdiag, std::abs(val));
-      }
-    }
-
-    // Check V_i^T * V_j ≈ 0 for j < i
-    for (unsigned int j = 0; j < i; ++j) {
-      auto Vj = V.block_view(j);
-      Vi.dot(Vj, temp_block);
-#if WITH_SYCL_BACKEND
-      for (unsigned int k = 0; k < bs * bs; ++k) max_offdiag = std::max(max_offdiag, std::abs(temp_block.data[k]));
-#elif WITH_GINKGO_BACKEND
-      for (unsigned int k = 0; k < bs * bs; ++k) max_offdiag = std::max(max_offdiag, std::abs(temp_block.data->get_values()[k]));
-#endif
-    }
-  }
-
-  std::cout << "    Max diagonal error: " << max_diag_error << std::endl;
-  std::cout << "    Max off-block error: " << max_offdiag << std::endl;
-}
 
 // Test the Lanczos relation: A*V = V*T + V_{k+1}*beta^T*e_k^T
 template <trl::Eigenproblem EVP>

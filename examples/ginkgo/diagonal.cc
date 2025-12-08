@@ -11,16 +11,16 @@
 
 #include <ginkgo/ginkgo.hpp>
 
-#include "laplace.hh"
+#include "diagonal.hh"
 
 int main(int argc, char* argv[])
 {
   using Scalar = double;
-  constexpr unsigned int bs = 1; // Block size
-  std::size_t N = 256;           // Matrix size
+  constexpr unsigned int bs = 1;
+  std::size_t N = 256; // Matrix size
 
   using BMV = trl::ginkgo::BlockMultivector<Scalar, bs>;
-  using EVP = Laplace1DEigenproblem<Scalar, bs>;
+  using EVP = DiagonalEigenproblem<Scalar, bs>;
   static_assert(trl::BlockMultiVector<BMV>);
   static_assert(trl::Eigenproblem<EVP>);
 
@@ -56,7 +56,6 @@ int main(int argc, char* argv[])
   }
 
   // Print out the computed eigenvalues and errors
-  // Exact eigenvalues for 1D Laplacian with Dirichlet BCs: λ_k = 2 - 2*cos(k*π/(N+1))
   const auto& eigvals = evp->get_current_eigenvalues();
   std::cout << "\nComputed eigenvalues and errors:\n";
   std::cout << "  Index    Computed        Exact          Error\n";
@@ -64,7 +63,7 @@ int main(int argc, char* argv[])
   double max_error = 0.0;
   for (std::size_t i = 0; i < params.nev; ++i) {
     double computed = eigvals.get_const_data()[i];
-    double exact = 2.0 - 2.0 * std::cos((i + 1) * M_PI / (N + 1));
+    double exact = static_cast<double>(i + 1);
     double error = std::abs(computed - exact);
     max_error = std::max(max_error, error);
     std::cout << "  " << std::setw(5) << i << "    " << std::setw(10) << std::scientific << std::setprecision(6) << computed << "    " << std::setw(10) << std::scientific << std::setprecision(6)

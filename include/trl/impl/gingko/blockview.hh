@@ -12,61 +12,50 @@ public:
   using MatrixBlockView = MatrixBlockView<T, bs>;
 
   BlockView(gko::matrix::Dense<T>* data)
-      : one(gko::matrix::Dense<T>::create(data->get_executor(), gko::dim<2>{1, 1}))
-      , minus_one(gko::matrix::Dense<T>::create(data->get_executor(), gko::dim<2>{1, 1}))
-      , zero(gko::matrix::Dense<T>::create(data->get_executor(), gko::dim<2>{1, 1}))
-      , data(data)
+      : one_(gko::matrix::Dense<T>::create(data->get_executor(), gko::dim<2>{1, 1}))
+      , minus_one_(gko::matrix::Dense<T>::create(data->get_executor(), gko::dim<2>{1, 1}))
+      , data_(data)
   {
-    one->fill(1);
-    minus_one->fill(-1);
-    zero->fill(0);
+    one_->fill(1);
+    minus_one_->fill(-1);
   }
 
-  void copy_from(BlockView other) { *data = *(other.data); }
+  void copy_from(BlockView other) { *data_ = *(other.data_); }
 
   BlockView& operator-=(BlockView other)
   {
-    data->add_scaled(minus_one, other.data);
+    data_->add_scaled(minus_one_, other.data_);
     return *this;
   }
 
-  void mult_add(MatrixBlockView W, BlockView other) { data->apply(one, W.data, one, other.data); }
+  void mult_add(MatrixBlockView W, BlockView other) { data_->apply(one_, W.data_, one_, other.data_); }
 
-  void mult(MatrixBlockView W, BlockView other) { data->apply(W.data, other.data); }
+  void mult(MatrixBlockView W, BlockView other) { data_->apply(W.data_, other.data_); }
 
   void mult_transpose(MatrixBlockView W, BlockView other)
   {
-    auto Wt = W.data->transpose();
-    data->apply(Wt, other.data);
+    auto Wt = W.data_->transpose();
+    data_->apply(Wt, other.data_);
   }
 
   void dot(BlockView other, MatrixBlockView B)
   {
-    auto data_t = data->conj_transpose();
-    data_t->apply(other.data, B.data);
+    auto data_t = data_->conj_transpose();
+    data_t->apply(other.data_, B.data_);
   }
 
-  T norm() const
-  {
-    // This only works for OmpExecutor
-    auto values = data->get_const_values();
-    T res = 0;
-    for (std::size_t i = 0; i < rows() * cols(); ++i) res += values[i] * values[i];
-    return std::sqrt(res);
-  }
+  void subtract_product(BlockView other, MatrixBlockView B) { other.data_->apply(minus_one_, B.data_, one_, data_); }
 
-  void subtract_product(BlockView other, MatrixBlockView B) { other.data->apply(minus_one, B.data, one, data); }
+  void set_zero() { data_->fill(0); }
 
-  void set_zero() { data->fill(0); }
+  std::size_t rows() const { return data_->get_size()[0]; }
+  std::size_t cols() const { return data_->get_size()[1]; }
 
-  std::size_t rows() const { return data->get_size()[0]; }
-  std::size_t cols() const { return data->get_size()[1]; }
-
-  gko::matrix::Dense<T>* data;
+  gko::matrix::Dense<T>* data() { return data_; };
 
 private:
-  std::shared_ptr<gko::matrix::Dense<T>> one;
-  std::shared_ptr<gko::matrix::Dense<T>> minus_one;
-  std::shared_ptr<gko::matrix::Dense<T>> zero;
+  std::shared_ptr<gko::matrix::Dense<T>> one_;
+  std::shared_ptr<gko::matrix::Dense<T>> minus_one_;
+  gko::matrix::Dense<T>* data_;
 };
 } // namespace trl::ginkgo

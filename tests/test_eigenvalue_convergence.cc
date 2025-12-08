@@ -60,28 +60,19 @@ bool test_diagonal_convergence(sycl::queue& q, bool verbose)
   bool passed = true;
   Scalar max_error = 0;
 
-  if (verbose) {
-    std::cout << "\n  Eigenvalue comparison:\n";
-  }
+  if (verbose) std::cout << "\n  Eigenvalue comparison:\n";
 
   for (unsigned int i = 0; i < nev; ++i) {
     Scalar error = std::abs(computed[i] - exact_eigenvalues[i]);
     max_error = std::max(max_error, error);
 
-    if (verbose) {
-      std::cout << "    λ[" << i << "] = " << computed[i] << " (exact: " << exact_eigenvalues[i] << ", error: " << error << ")\n";
-    }
+    if (verbose) std::cout << "    λ[" << i << "] = " << computed[i] << " (exact: " << exact_eigenvalues[i] << ", error: " << error << ")\n";
 
-    if (error > tol) {
-      passed = false;
-    }
+    if (error > tol) passed = false;
   }
 
-  if (passed) {
-    std::cout << "Passed (max error: " << max_error << ")\n";
-  } else {
-    std::cout << "Failed (max error: " << max_error << " > " << tol << ")\n";
-  }
+  if (passed) std::cout << "Passed (max error: " << max_error << ")\n";
+  else std::cout << "Failed (max error: " << max_error << " > " << tol << ")\n";
 
   return passed;
 }
@@ -119,9 +110,7 @@ bool test_laplace_convergence(sycl::queue& q, bool verbose)
 
   // Compute analytical eigenvalues
   std::vector<Scalar> exact_eigenvalues(N);
-  for (int i = 0; i < N; ++i) {
-    exact_eigenvalues[i] = 2.0 * (1.0 - std::cos((i + 1) * M_PI / (N + 1)));
-  }
+  for (int i = 0; i < N; ++i) exact_eigenvalues[i] = 2.0 * (1.0 - std::cos((i + 1) * M_PI / (N + 1)));
 
   // Sort computed eigenvalues
   const auto* eigenvalues = solver.get_eigenvalues();
@@ -131,28 +120,19 @@ bool test_laplace_convergence(sycl::queue& q, bool verbose)
   bool passed = true;
   Scalar max_error = 0;
 
-  if (verbose) {
-    std::cout << "\n  Eigenvalue comparison:\n";
-  }
+  if (verbose) std::cout << "\n  Eigenvalue comparison:\n";
 
   for (unsigned int i = 0; i < nev; ++i) {
     Scalar error = std::abs(computed[i] - exact_eigenvalues[i]);
     max_error = std::max(max_error, error);
 
-    if (verbose) {
-      std::cout << "    λ[" << i << "] = " << computed[i] << " (exact: " << exact_eigenvalues[i] << ", error: " << error << ")\n";
-    }
+    if (verbose) std::cout << "    λ[" << i << "] = " << computed[i] << " (exact: " << exact_eigenvalues[i] << ", error: " << error << ")\n";
 
-    if (error > tol) {
-      passed = false;
-    }
+    if (error > tol) passed = false;
   }
 
-  if (passed) {
-    std::cout << "Passed (max error: " << max_error << ")\n";
-  } else {
-    std::cout << "Failed (max error: " << max_error << " > " << tol << ")\n";
-  }
+  if (passed) std::cout << "Passed (max error: " << max_error << ")\n";
+  else std::cout << "Failed (max error: " << max_error << " > " << tol << ")\n";
 
   return passed;
 }
@@ -187,7 +167,8 @@ int main()
   if (num_failed == 0) {
     std::cout << "All convergence tests passed!\n";
     return 0;
-  } else {
+  }
+  else {
     std::cout << num_failed << " test(s) failed!\n";
     return 1;
   }

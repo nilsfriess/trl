@@ -52,7 +52,7 @@ public:
     const unsigned int max_restarts = 1000;
 
     while (result.iterations < max_restarts) {
-      std::cout << "Restart iteration " << result.iterations << "\n";
+      // std::cout << "Restart iteration " << result.iterations << "\n";
       result.iterations++;
 
       // Extend the basis to the maximum allowed size
@@ -62,27 +62,27 @@ public:
       // Solve the small projected system
       evp->solve_small_dense(T);
       const auto& Y = evp->get_current_eigenvectors();
-      const auto& ritz_values = evp->get_current_eigenvalues();
+      // const auto& ritz_values = evp->get_current_eigenvalues();
 
       auto converged = check_convergence();
       // Diagnostic: print residual norms for the current Ritz values
       {
-        std::cout << "Residual norms (first " << nev << "): ";
-        for (unsigned int i = 0; i < nev; ++i) {
-          std::cout << res_norms[i];
-          if (i + 1 < nev) std::cout << ", ";
-        }
-        std::cout << "\n";
+        // std::cout << "Residual norms (first " << nev << "): ";
+        // for (unsigned int i = 0; i < nev; ++i) {
+        //   std::cout << res_norms[i];
+        //   if (i + 1 < nev) std::cout << ", ";
+        // }
+        // std::cout << "\n";
       }
       if (converged >= nev) {
         result.converged = true;
-        std::cout << "Converged " << converged << " eigenvalues after " << result.iterations << " iterations\n";
+        // std::cout << "Converged " << converged << " eigenvalues after " << result.iterations << " iterations\n";
         return result;
       }
 
       // Check if restart is needed (only if nev < ncv)
       if (nev >= ncv) {
-        std::cout << "Maximum basis size reached without convergence (nev >= ncv). Cannot restart.\n";
+        // std::cout << "Maximum basis size reached without convergence (nev >= ncv). Cannot restart.\n";
         result.converged = false;
         return result;
       }
@@ -91,7 +91,7 @@ public:
       // Use all Lanczos vectors (0 to ncv/blocksize-1) to compute Ritz vectors,
       // but only keep the first nev/blocksize Ritz vectors in the result
       // Manually compute W = V * Y for only the first nev/blocksize columns of Y
-      std::cout << "  Computing " << nev / blocksize << " Ritz vectors from " << ncv / blocksize << " Lanczos vectors\n";
+      // std::cout << "  Computing " << nev / blocksize << " Ritz vectors from " << ncv / blocksize << " Lanczos vectors\n";
       // First zero out the blocks we'll write to
       for (std::size_t j = 0; j < nev / blocksize; ++j) {
         W.block_view(j).set_zero();
@@ -129,12 +129,12 @@ public:
       converged = check_convergence();
       if (converged >= nev) {
         result.converged = true;
-        std::cout << "Converged " << converged << " eigenvalues after " << result.iterations << " iterations\n";
+        // std::cout << "Converged " << converged << " eigenvalues after " << result.iterations << " iterations\n";
         return result;
       }
 
       // Not yet converged, so we need to restart
-      std::cout << "Converged " << converged << " out of " << nev << " eigenvalues. Restarting...\n";
+      // std::cout << "Converged " << converged << " out of " << nev << " eigenvalues. Restarting...\n";
 
       // Reset convergence counter for the new basis
       nconv = 0;
@@ -227,7 +227,7 @@ public:
       k += 1;
     }
 
-    std::cout << "Maximum number of restarts (" << max_restarts << ") reached. Converged " << nconv * blocksize << " out of " << nev << " eigenvalues.\n";
+    // std::cout << "Maximum number of restarts (" << max_restarts << ") reached. Converged " << nconv * blocksize << " out of " << nev << " eigenvalues.\n";
     return result;
   }
 
@@ -361,7 +361,6 @@ private:
     auto beta = B.block_view(0, 0);
     auto result = B.block_view(0, 1);
     const auto& Y = evp->get_current_eigenvectors();
-    const auto& residuals = evp->get_temp_vector(blocksize);
 
     for (std::size_t block = 0; block < nev / blocksize; ++block) {
       auto Y_block = Y.block_view(Y.block_rows() - 1, block);
@@ -411,8 +410,6 @@ public:
   {
     assert(k < m);
     assert(m <= ncv / blocksize);
-
-    std::cout << "  Extending basis from block " << k << " to block " << m << "\n";
 
     unsigned int n_op_apply = 0;
 

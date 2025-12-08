@@ -8,8 +8,8 @@
 
 #include <oneapi/math.hpp>
 
-#include "trl/impl/onemath/blockmatrix.hh"
 #include "blockview.hh"
+#include "trl/impl/onemath/blockmatrix.hh"
 
 namespace trl {
 template <class T, unsigned int bs>
