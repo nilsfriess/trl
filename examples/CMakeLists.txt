@@ -24,5 +24,11 @@ if(${WITH_GINKGO_BACKEND})
   target_include_directories(evp_examples_ginkgo PRIVATE ../include)
   target_link_libraries(evp_examples_ginkgo PRIVATE Ginkgo::ginkgo Eigen3::Eigen)
   target_compile_definitions(evp_examples_ginkgo PUBLIC WITH_GINKGO_BACKEND)
+
+  add_executable(generalized_fem_ginkgo ginkgo/generalized_fem.cc)
+  target_include_directories(generalized_fem_ginkgo PRIVATE ../include)
+  target_link_libraries(generalized_fem_ginkgo PRIVATE Ginkgo::ginkgo Eigen3::Eigen)
+  target_compile_definitions(generalized_fem_ginkgo PUBLIC WITH_GINKGO_BACKEND)
+
 endif()
 

@@ -66,7 +66,7 @@ public:
           if (j > 0 && with_separator) std::cout << "|";
 
           for (std::size_t bj = 0; bj < bs; ++bj) {
-            auto entry = block.data->at(bi, bj);
+            auto entry = block.data()->at(bi, bj);
             if (std::abs(entry) < tolerance) std::cout << std::setw(field_width) << "*";
             else std::cout << std::setw(field_width) << entry;
             if (bj < bs - 1) std::cout << " ";

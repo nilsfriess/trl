@@ -20,15 +20,22 @@ public:
   using MatrixBlockView = typename BlockMatrix::BlockView;
   static constexpr unsigned int blocksize = bs;
 
-  StandardGinkgoEVP(std::shared_ptr<const gko::Executor> exec, std::size_t N)
+  /// Eigenvalue ordering for the projected system
+  enum class EigenvalueOrder { Ascending, Descending };
+
+  StandardGinkgoEVP(std::shared_ptr<const gko::Executor> exec, std::size_t N, EigenvalueOrder order = EigenvalueOrder::Ascending)
       : exec_(std::move(exec))
       , N_(N)
+      , eigenvalue_order_(order)
       , current_eigenvalues_(exec_, 0)
       , current_eigenvectors_(exec_, 0, 0)
   {
   }
 
   virtual ~StandardGinkgoEVP() = default;
+
+  /// Set eigenvalue ordering (Ascending for smallest first, Descending for largest first)
+  void set_eigenvalue_order(EigenvalueOrder order) { eigenvalue_order_ = order; }
 
   void dot(BlockView x, BlockView y, MatrixBlockView B) { x.dot(y, B); }
 
@@ -85,18 +92,38 @@ public:
         throw std::runtime_error("Eigendecomposition failed");
       }
 
-      // Get the eigenvalues from Eigen
+      // Get the eigenvalues from Eigen (in ascending order by default)
+      // For Descending order (e.g., shift-invert), reverse to get largest first
       if (current_eigenvalues_.get_size() != n) current_eigenvalues_ = gko::array<T>(exec_, n);
       auto* eigvals_ptr = current_eigenvalues_.get_data();
-      Eigen::Map<Eigen::Matrix<T, Eigen::Dynamic, 1>>(eigvals_ptr, n) = solver.eigenvalues();
+
+      if (eigenvalue_order_ == EigenvalueOrder::Descending) {
+        // Reverse order: largest eigenvalues first
+        for (std::size_t i = 0; i < n; ++i) eigvals_ptr[i] = solver.eigenvalues()(n - 1 - i);
+      }
+      else {
+        // Ascending order: smallest eigenvalues first (default)
+        for (std::size_t i = 0; i < n; ++i) eigvals_ptr[i] = solver.eigenvalues()(i);
+      }
 
       // Store eigenvectors in BlockMatrix format
       if (current_eigenvectors_.block_rows() != B.block_rows()) current_eigenvectors_ = create_blockmatrix(B.block_rows(), B.block_cols());
       for (std::size_t i = 0; i < B.block_rows(); ++i) {
         for (std::size_t j = 0; j < B.block_cols(); ++j) {
           auto block = current_eigenvectors_.block_view(i, j);
-          for (unsigned int bi = 0; bi < bs; ++bi)
-            for (unsigned int bj = 0; bj < bs; ++bj) block.data()->at(bi, bj) = solver.eigenvectors()(i * bs + bi, j * bs + bj);
+          const std::size_t n_cols = B.block_cols() * bs;
+          for (unsigned int bi = 0; bi < bs; ++bi) {
+            for (unsigned int bj = 0; bj < bs; ++bj) {
+              if (eigenvalue_order_ == EigenvalueOrder::Descending) {
+                // Reverse the column order for descending
+                block.data()->at(bi, bj) = solver.eigenvectors()(i * bs + bi, n_cols - 1 - (j * bs + bj));
+              }
+              else {
+                // Normal order for ascending
+                block.data()->at(bi, bj) = solver.eigenvectors()(i * bs + bi, j * bs + bj);
+              }
+            }
+          }
         }
       }
     }
@@ -137,6 +164,7 @@ public:
 protected:
   std::shared_ptr<const gko::Executor> exec_;
   std::size_t N_;
+  EigenvalueOrder eigenvalue_order_;
 
   // Storage for eigenvalues and eigenvectors from solve_small_dense
   mutable gko::array<T> current_eigenvalues_;

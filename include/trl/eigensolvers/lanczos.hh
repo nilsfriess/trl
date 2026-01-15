@@ -23,6 +23,7 @@ public:
       : evp(std::move(evp_))
       , nev(params.nev)
       , ncv(params.ncv)
+      , max_restarts(params.max_restarts)
       , res_norms(nev, 0)
       , V(evp->create_multivector(evp->size(), ncv + EVP::blocksize))
       , W(evp->create_multivector(evp->size(), ncv + EVP::blocksize))
@@ -48,8 +49,6 @@ public:
         .n_op_apply = 0,
     };
     unsigned int k = 0;
-
-    const unsigned int max_restarts = 1000;
 
     while (result.iterations < max_restarts) {
       // std::cout << "Restart iteration " << result.iterations << "\n";
@@ -134,8 +133,6 @@ public:
       }
 
       // Not yet converged, so we need to restart
-      // std::cout << "Converged " << converged << " out of " << nev << " eigenvalues. Restarting...\n";
-
       // Reset convergence counter for the new basis
       nconv = 0;
 
@@ -258,6 +255,16 @@ public:
    *  a threshold based on the tolerance and machine epsilon.
    *
    *  @returns The number of converged eigenvalues
+   *
+   *  @note TODO (GPU optimization): For GPU backends, this method requires
+   *  host synchronization to compare residual norms against thresholds.
+   *  To avoid this, implement a device-side convergence check kernel that:
+   *  1. Computes residual norms on device
+   *  2. Compares against thresholds on device
+   *  3. Returns only a single boolean/count via a reduction
+   *  See Ginkgo's stopping criterion implementation for reference:
+   *  they use device_storage arrays and run the convergence check entirely
+   *  on device, only syncing the final all_converged/one_changed booleans.
    */
   unsigned int check_convergence()
   {
@@ -309,6 +316,11 @@ private:
    *  Computes ||r_i|| = ||beta * e_m^T * y_i|| for each eigenvector y_i.
    *  The residual is the norm of beta (last off-diagonal block) times
    *  the last blocksize elements of the i-th eigenvector.
+   *
+   *  @note TODO (GPU optimization): two_norm_on_host() requires a device-to-host
+   *  sync for GPU backends. Consider fusing the norm computation and convergence
+   *  check into a single device kernel that returns only a count of converged
+   *  eigenvalues, avoiding the transfer of individual residual norms.
    */
   // void compute_residual_norms()
   // {
@@ -427,29 +439,9 @@ public:
       auto V_curr = V.block_view(i);
       auto V_next = V.block_view(i + 1);
 
-      /*  {
-         std::cout << "========================================\n";
-         std::cout << "BEFORE APPLY\n";
-         auto tmp = evp->create_blockmatrix(1, 1);
-         auto norm = tmp.block_view(0, 0);
-         V_curr.data->compute_norm2(norm.data);
-         std::cout << "||V_curr|| = " << norm.data->at(0, 0) << ", ";
-       } */
-
       // Step 1: v_{i+1} = A v_i
       evp->apply(V_curr, V_next);
       n_op_apply++;
-
-      /* {
-        std::cout << "AFTER APPLY\n";
-        auto tmp = evp->create_blockmatrix(1, 1);
-        auto norm = tmp.block_view(0, 0);
-        V_curr.data->compute_norm2(norm.data);
-        std::cout << "||V_curr|| = " << norm.data->at(0, 0) << ", ";
-        V_next.data->compute_norm2(norm.data);
-        std::cout << "||V_next|| = " << norm.data->at(0, 0) << "\n";
-        std::cout << "========================================\n";
-      } */
 
       // Step 2: v_{i+1} -= v_{i-1} * beta_{i-1}^T
       if (i > 0) {
@@ -466,11 +458,11 @@ public:
       V_curr.mult(Tii, W0);
       V_next -= W0;
 
-      // Step 5: Full reorthogonalization
+      // Step 5: Full reorthogonalization (uses same inner product as evp->dot)
       for (unsigned int j = 0; j < i + 1; ++j) {
         auto Vj = V.block_view(j);
 
-        Vj.dot(V_next, Z0);
+        evp->dot(Vj, V_next, Z0);
         V_next.subtract_product(Vj, Z0);
       }
 
@@ -498,6 +490,7 @@ private:
   // Parameters
   const unsigned int nev;
   const unsigned int ncv;
+  const unsigned int max_restarts;
   const Scalar tolerance = 1e-8; // Default tolerance for convergence
 
   // Convergence tracking
