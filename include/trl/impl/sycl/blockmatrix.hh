@@ -7,23 +7,23 @@
 
 #include "matrixblockview.hh"
 
-namespace trl {
+namespace trl::sycl {
 template <class T, unsigned int bs>
 class BlockMatrix {
 public:
   using BlockView = MatrixBlockView<T, bs>;
 
-  BlockMatrix(sycl::queue queue, std::size_t block_rows, std::size_t block_cols)
+  BlockMatrix(::sycl::queue queue, std::size_t block_rows, std::size_t block_cols)
       : queue(queue)
       , block_rows_(block_rows)
       , block_cols_(block_cols)
   {
-    data_ = sycl::malloc_shared<T>(block_rows * block_cols * bs * bs, queue);
+    data_ = ::sycl::malloc_shared<T>(block_rows * block_cols * bs * bs, queue);
     // Zero-initialize the matrix
     queue.memset(data_, 0, block_rows * block_cols * bs * bs * sizeof(T)).wait();
   }
 
-  ~BlockMatrix() { sycl::free(data_, queue); }
+  ~BlockMatrix() { ::sycl::free(data_, queue); }
 
   std::size_t block_rows() const { return block_rows_; }
   std::size_t block_cols() const { return block_cols_; }
@@ -33,7 +33,7 @@ public:
     assert(block_row < block_rows_);
     assert(block_col < block_cols_);
     const auto block_index = block_row * block_cols_ + block_col;
-    return BlockView(const_cast<sycl::queue*>(&queue), data_ + block_index * bs * bs);
+    return BlockView(const_cast<::sycl::queue*>(&queue), data_ + block_index * bs * bs);
   }
 
   // Allow BlockMultivector to access data for optimized multiplication
@@ -102,7 +102,7 @@ public:
   }
 
 private:
-  sycl::queue queue;
+  ::sycl::queue queue;
 
   std::size_t block_rows_;
   std::size_t block_cols_;
@@ -110,4 +110,4 @@ private:
   T* data_;
 };
 
-} // namespace trl
+} // namespace trl::sycl

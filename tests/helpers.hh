@@ -43,6 +43,7 @@ bool check_orthogonality(EVP& evp, TestHelper& helper, typename EVP::BlockMultiv
   if (verbose) std::cout << "  Checking orthogonality of V blocks..." << std::endl;
   Scalar max_offdiag = 0;
   Scalar max_diag_error = 0;
+  int max_offdiag_i = -1, max_offdiag_j = -1;
 
   auto temp = evp.create_blockmatrix(1, 1);
   auto temp_block = temp.block_view(0, 0);
@@ -52,6 +53,7 @@ bool check_orthogonality(EVP& evp, TestHelper& helper, typename EVP::BlockMultiv
 
     // Check V_i^T * V_i = I
     Vi.dot(Vi, temp_block);
+    helper.sync();  // Wait BEFORE reading data
     auto temp_block_host = helper.to_host_data(temp_block);
 
     for (unsigned int r = 0; r < bs; ++r) {
@@ -66,14 +68,23 @@ bool check_orthogonality(EVP& evp, TestHelper& helper, typename EVP::BlockMultiv
     for (unsigned int j = 0; j < i; ++j) {
       auto Vj = V.block_view(j);
       Vi.dot(Vj, temp_block);
+      helper.sync();  // Wait BEFORE reading data
       temp_block_host = helper.to_host_data(temp_block);
-      for (unsigned int k = 0; k < bs * bs; ++k) max_offdiag = std::max(max_offdiag, std::abs(temp_block_host[k]));
+      for (unsigned int k = 0; k < bs * bs; ++k) {
+        if (std::abs(temp_block_host[k]) > max_offdiag) {
+          max_offdiag = std::abs(temp_block_host[k]);
+          max_offdiag_i = i;
+          max_offdiag_j = j;
+        }
+      }
     }
   }
 
   if (verbose) {
     std::cout << "    Max diagonal error: " << max_diag_error << std::endl;
-    std::cout << "    Max off-block error: " << max_offdiag << std::endl;
+    std::cout << "    Max off-block error: " << max_offdiag;
+    if (max_offdiag_i >= 0) std::cout << " (blocks " << max_offdiag_i << "," << max_offdiag_j << ")";
+    std::cout << std::endl;
   }
 
   return max_offdiag < tolerance and max_diag_error < tolerance;

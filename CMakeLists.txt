@@ -7,16 +7,19 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
-option(WITH_SYCL_BACKEND "Enable the SYCL backend based on the Intel SYCL Compiler and oneMath" Off)
-option(WITH_GINKGO_BACKEND "Enable the gingko backend" On)
+option(WITH_SYCL_BACKEND "Enable the SYCL backend based" On)
+option(WITH_GINKGO_BACKEND "Enable the gingko backend" Off)
 
 if(${WITH_SYCL_BACKEND})
-  find_package(IntelSYCL REQUIRED)
-  find_package(oneMath REQUIRED)
+  find_package(AdaptiveCpp REQUIRED)
+  find_package(Eigen3 NO_MODULE REQUIRED)
 endif()
 
 if(${WITH_GINKGO_BACKEND})
   find_package(Ginkgo REQUIRED)
+
+  find_package(hipsolver REQUIRED)
+  find_package(hipblas REQUIRED)
 endif()
 
 # Create header-only library target
@@ -29,12 +32,16 @@ target_include_directories(trl INTERFACE
 )
 
 if (${WITH_SYCL_BACKEND})
-  target_link_libraries(trl INTERFACE ONEMATH::onemath)
   target_compile_definitions(trl INTERFACE WITH_SYCL_BACKEND)
+  target_link_libraries(trl INTERFACE Eigen3::Eigen)
 endif()
 
 if (${WITH_GINKGO_BACKEND})
   target_link_libraries(trl INTERFACE Ginkgo::ginkgo)
+  target_link_libraries(trl INTERFACE roc::hipsolver)
+  target_link_libraries(trl INTERFACE roc::hipblas)
+  target_include_directories(trl INTERFACE ${hipsolver_INCLUDE_DIRS})
+  # target_include_directories(trl INTERFACE ${hipblas_INCLUDE_DIRS})
   target_compile_definitions(trl INTERFACE WITH_GINKGO_BACKEND)
 endif()
 

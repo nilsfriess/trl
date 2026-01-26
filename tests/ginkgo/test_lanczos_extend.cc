@@ -16,7 +16,8 @@
 template <class Scalar, unsigned int bs>
 bool run_test(bool verbose)
 {
-  auto exec = gko::OmpExecutor::create();
+  // auto exec = gko::OmpExecutor::create();
+  auto exec = gko::HipExecutor::create(0, gko::OmpExecutor::create());
 
   const unsigned int N = 256;
   using EVP = DiagonalEigenproblem<Scalar, bs>;

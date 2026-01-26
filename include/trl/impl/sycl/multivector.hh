@@ -6,12 +6,10 @@
 
 #include <sycl/sycl.hpp>
 
-#include <oneapi/math.hpp>
-
+#include "blockmatrix.hh"
 #include "blockview.hh"
-#include "trl/impl/onemath/blockmatrix.hh"
 
-namespace trl {
+namespace trl::sycl {
 template <class T, unsigned int bs>
 class BlockMultivector {
 public:
@@ -22,14 +20,14 @@ public:
 
   using BlockMatrix = BlockMatrix<T, bs>;
 
-  BlockMultivector(sycl::queue queue, std::size_t rows, std::size_t cols)
+  BlockMultivector(::sycl::queue queue, std::size_t rows, std::size_t cols)
       : queue(queue)
       , rows(rows)
       , blocks_(cols / blocksize)
   {
     if (cols % blocksize != 0) throw std::invalid_argument("Number of columns must be divisible by blocksize");
 
-    data = sycl::malloc_shared<T>(rows * cols, queue);
+    data = ::sycl::malloc_shared<T>(rows * cols, queue);
     queue.memset(data, 0, rows * cols * sizeof(T)).wait();
   }
 
@@ -38,18 +36,19 @@ public:
       , rows(other.rows)
       , blocks_(other.blocks_)
   {
-    data = sycl::malloc_shared<T>(rows * blocks_ * bs, queue);
+    data = ::sycl::malloc_shared<T>(rows * blocks_ * bs, queue);
     queue.memset(data, 0, rows * blocks_ * bs * sizeof(T)).wait();
   }
 
   BlockMultivector& operator=(const BlockMultivector& other)
   {
+    assert(false && "not implemented");
     if (this != &other) {
-      sycl::free(data, queue);
+      ::sycl::free(data, queue);
       queue = other.queue;
       rows = other.rows;
       blocks_ = other.blocks_;
-      data = sycl::malloc_shared<T>(rows * blocks_ * bs, queue);
+      data = ::sycl::malloc_shared<T>(rows * blocks_ * bs, queue);
       queue.memset(data, 0, rows * blocks_ * bs * sizeof(T)).wait();
     }
     return *this;
@@ -67,6 +66,7 @@ public:
   BlockMultivector& operator=(BlockMultivector&& other)
   {
     if (this != &other) {
+      if (data) ::sycl::free(data, queue);
       queue = std::move(other.queue);
       rows = other.rows;
       blocks_ = other.blocks_;
@@ -78,7 +78,7 @@ public:
 
   ~BlockMultivector()
   {
-    if (data) sycl::free(data, queue);
+    if (data) ::sycl::free(data, queue);
   }
 
   BlockView block_view(std::size_t block)
@@ -92,7 +92,7 @@ public:
   {
     assert(block < blocks_);
 
-    return BlockView(const_cast<sycl::queue*>(&queue), data + block * rows * bs, rows);
+    return BlockView(const_cast<::sycl::queue*>(&queue), data + block * rows * bs, rows);
   }
 
   std::size_t blocks() const { return blocks_; }
@@ -105,6 +105,7 @@ public:
   {
     assert(rows == other.rows);
     assert(blocks_ == other.blocks_);
+    assert(false && "not implemented");
 
     for (std::size_t i = 0; i < blocks_; ++i) {
       auto this_block = block_view(i);
@@ -122,7 +123,11 @@ public:
    *  @param matrix The block matrix to multiply with
    *  @param result The blockvector to store the result
    */
-  void mult(const BlockMatrix& matrix, BlockMultivector& result) { mult(matrix, result, blocks_ - 1); }
+  void mult(const BlockMatrix& matrix, BlockMultivector& result)
+  {
+    assert(false && "not implemented");
+    mult(matrix, result, blocks_ - 1);
+  }
 
   /** @brief Multiply this blockvector by a blockmatrix and store in result
    *
@@ -144,44 +149,15 @@ public:
   void mult(const BlockMatrix& matrix, BlockMultivector& result, std::size_t to_block)
   {
     // Verify dimension constraints
-    assert(to_block < blocks_);
-    assert(to_block < matrix.block_rows());
-    assert(matrix.block_cols() <= result.blocks());
-    assert(rows == result.rows);
-
-    if (rows != result.rows) throw std::invalid_argument("Row dimensions must match");
-
-    // Queue all gemm operations without waiting (for kernel fusion)
-    std::vector<sycl::event> events;
-    events.reserve((to_block + 1) * matrix.block_cols());
-
-    // For each output block column
-    for (std::size_t j = 0; j < matrix.block_cols(); ++j) {
-      T* result_ptr = result.data + j * rows * bs;
-
-      // For each input block row (0 to to_block inclusive)
-      for (std::size_t i = 0; i <= to_block; ++i) {
-        T* input_ptr = data + i * rows * bs;
-        T* matrix_ptr = matrix.data_ + (i * matrix.block_cols() + j) * bs * bs;
-
-        // Queue GEMM: result[j] += this[i] * matrix[i,j]
-        // Use beta=0 for first iteration (i=0), beta=1 for accumulation (i>0)
-        events.push_back(oneapi::math::blas::row_major::gemm(queue, oneapi::math::transpose::nontrans, oneapi::math::transpose::nontrans, rows, bs, bs, T(1.0), input_ptr, bs, matrix_ptr, bs,
-                                                             (i == 0) ? T(0.0) : T(1.0), // beta: 0 for first, 1 for accumulation
-                                                             result_ptr, bs));
-      }
-    }
-
-    // Single synchronization point after all operations are queued
-    sycl::event::wait(events);
+    assert(false && "not implemented");
   }
 
 private:
-  sycl::queue queue;
+  ::sycl::queue queue;
 
   std::size_t rows;
   std::size_t blocks_;
 
   T* data;
 };
-} // namespace trl
+} // namespace trl::sycl

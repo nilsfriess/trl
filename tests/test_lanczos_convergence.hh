@@ -17,11 +17,12 @@ bool test_lanczos_convergence(std::shared_ptr<EVP> evp, TestHelper& helper, cons
   std::cout << "\nTesting Lanczos convergence, type = " << trl::type_str<Scalar>() << ", N = " << N << ", bs = " << bs << ": ";
 
   unsigned int nev = exact_eigenvalues.size();
-  trl::EigensolverParams params{.nev = nev, .ncv = 4 * nev};
+  trl::EigensolverParams params{.nev = nev, .ncv = 4 * nev, .max_restarts = 1000};
   trl::BlockLanczos lanczos(evp, params);
 
   auto V0 = lanczos.initial_block();
   helper.set_random(V0);
+  helper.sync();
 
   bool passed = true;
 

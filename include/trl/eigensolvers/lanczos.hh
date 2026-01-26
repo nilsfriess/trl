@@ -33,6 +33,16 @@ public:
   // , Y(evp->create_blockmatrix(ncv / blocksize, ncv / blocksize))
   // , ritz_values(evp->malloc(ncv))
   {
+    // Validate that we won't exhaust the Krylov subspace
+    // The maximum number of orthogonal vectors is evp->size()
+    // We need ncv + blocksize vectors (ncv blocks plus one trailing block)
+    if (ncv + blocksize > evp->size()) {
+      throw std::invalid_argument(
+          "ncv (" + std::to_string(ncv) + ") + blocksize (" + std::to_string(blocksize) +
+          ") exceeds problem dimension (" + std::to_string(evp->size()) +
+          "). Krylov subspace would be exhausted. Reduce ncv to at most " +
+          std::to_string(evp->size() - blocksize) + ".");
+    }
   }
 
   // ~BlockLanczos() {
@@ -214,10 +224,10 @@ public:
       // T should be symmetric, so T[i+1,i] = beta^T and T[i,i+1] = beta
       assert(k + 1 < T.block_rows());
       auto Ti1_i = T.block_view(k + 1, k);
-      Ti1_i.copy_from(beta);
+      Ti1_i.copy_from_transpose(beta);
 
       auto Ti_i1 = T.block_view(k, k + 1);
-      Ti_i1.copy_from_transpose(beta);
+      Ti_i1.copy_from(beta);
 
       // T.print();
 
@@ -470,8 +480,9 @@ public:
       evp->orthonormalize(V_next, beta);
 
       // Store beta in the block tridiagonal matrix T
-      // beta is lower triangular from Cholesky factorization
-      // T should be symmetric, so T[i+1,i] = beta^T and T[i,i+1] = beta
+      // beta is upper triangular Cholesky factor: V_old = V_new * beta
+      // The Lanczos relation is: A*V_i = ... + V_{i+1} * beta_i
+      // So T[i+1,i] = beta and T[i,i+1] = beta^T for symmetry
       if (i + 1 < T.block_rows()) {
         auto Ti1_i = T.block_view(i + 1, i);
         Ti1_i.copy_from(beta);

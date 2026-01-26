@@ -1,9 +1,11 @@
 #pragma once
 
-#include <trl/impl/onemath/multivector.hh>
+#include <Eigen/Core>
+#include <Eigen/Dense>
 
-#include <oneapi/math.hpp>
+#include <span>
 #include <sycl/sycl.hpp>
+#include <trl/impl/sycl/multivector.hh>
 
 template <class T, unsigned int bs>
 class DiagonalEVP {
@@ -11,23 +13,20 @@ public:
   using Index = std::int64_t;
   using Scalar = T;
   static constexpr unsigned int blocksize = bs;
-  using BlockMultivector = trl::BlockMultivector<T, bs>;
+  using BlockMultivector = trl::sycl::BlockMultivector<T, bs>;
   using BlockView = typename BlockMultivector::BlockView;
 
   DiagonalEVP(sycl::queue queue, Index N)
       : queue(queue)
       , N(N)
+      , eigenvectors(queue, 1, 1)
   {
     // Diagonal matrix with entries: diag[i] = i+1 (simpler than (i+1)^2 to avoid large values)
     diag = sycl::malloc_shared<T>(N, queue);
     for (Index i = 0; i < N; ++i) diag[i] = static_cast<T>(i + 1);
   }
 
-  ~DiagonalEVP()
-  {
-    sycl::free(diag, queue);
-    if (ortho_scratchpad_initialized) sycl::free(ortho_scratchpad, queue);
-  }
+  ~DiagonalEVP() { sycl::free(diag, queue); }
 
   void apply(BlockView X, BlockView Y)
   {
@@ -52,8 +51,10 @@ public:
   {
     // 1. Compute Gram matrix G = V^T * V (stored in R)
     V.dot(V, R);
+    queue.wait();
 
-    // 2. Do a CPU-side Cholesky on R (lower-triangular)
+    // 2. Do a CPU-side Cholesky on R
+    // We compute G = U^T * U where U is upper triangular (stored in upper part of A)
     T* A = R.data;
 
     for (Index j = 0; j < bs; ++j) {
@@ -76,10 +77,33 @@ public:
     for (Index i = 0; i < bs; ++i)
       for (Index j = 0; j < i; ++j) A[i * bs + j] = 0.0;
 
-    // 3. Compute V = V * L^{-T}
-    oneapi::math::blas::row_major::trsm(queue, oneapi::math::side::right, oneapi::math::uplo::upper, oneapi::math::transpose::nontrans, oneapi::math::diag::nonunit, V.rows(), bs, Scalar(1.0), R.data,
-                                        bs, V.data, bs)
-        .wait();
+    // Save U for later (R should output the Cholesky factor)
+    Eigen::Matrix<T, bs, bs> U_saved;
+    for (Index i = 0; i < bs; ++i)
+      for (Index j = 0; j < bs; ++j) U_saved(i, j) = A[i * bs + j];
+
+    // 3. Compute V = V * U^{-1}
+    // We need U^{-1} for the multiplication: V_new = V_old * U^{-1}
+    // Due to Eigen's column-major and our row-major, the mapping transposes:
+    // Eigen sees A^T. So if A contains U (upper tri), Eigen sees U^T (lower tri).
+    Eigen::Map<Eigen::Matrix<T, bs, bs>> Lt(A);
+    auto Lti = Lt.inverse().eval(); // Computes (U^T)^{-1} = U^{-T}
+    Lt = Lti;                       // A now contains U^{-T} in Eigen's view
+                                    // In our row-major view, A contains (U^{-T})^T = U^{-1}
+
+    // Use temporary to avoid aliasing
+    auto V_temp = create_multivector(V.rows(), bs);
+    auto V_temp_block = V_temp.block_view(0);
+    V.mult(R, V_temp_block); // V_temp = V * U^{-1}
+    queue.wait();            // Wait for mult to complete
+    V.copy_from(V_temp_block);
+    queue.wait(); // Ensure copy completes
+
+    // 4. Restore U in R (the Cholesky factor, not its inverse)
+    // The Lanczos algorithm needs R such that V_old = V_new * R
+    // Since V_old = V_new * U, we need R = U
+    for (Index i = 0; i < bs; ++i)
+      for (Index j = 0; j < bs; ++j) A[i * bs + j] = U_saved(i, j);
   }
 
   auto create_multivector(Index rows, Index cols) { return BlockMultivector(queue, rows, cols); }
@@ -98,75 +122,33 @@ public:
     return data;
   }
 
-  void solve_small_dense(const typename BlockMultivector::BlockMatrix& B, T* eigvals, typename BlockMultivector::BlockMatrix& eigvecs)
+  void solve_small_dense(const typename BlockMultivector::BlockMatrix& B) {
+    assert(false && "not implemented");
+  }
+
+  std::span<T, std::dynamic_extent> get_current_eigenvalues() const
   {
-    // B is a block tridiagonal matrix of dimension (block_rows * bs) x (block_cols * bs)
-    // We need to compute eigenvalues and eigenvectors of this dense matrix
+    assert(false && "not implemented");
+    return std::span<T, std::dynamic_extent>(eigenvalues, eigenvectors.block_rows() * bs);
+  }
 
-    const Index n = B.block_rows() * bs;
+  const typename BlockMultivector::BlockMatrix& get_current_eigenvectors() const
+  {
+    assert(false && "not implemented");
+    return eigenvectors;
+  }
 
-    // Allocate contiguous memory for the dense matrix (column-major for LAPACK)
-    T* B_dense = sycl::malloc_shared<T>(n * n, queue);
+  std::span<T, blocksize> get_eigenvalues_block(std::size_t block)
+  {
+    std::span<T, blocksize> ev_block(eigenvalues + block * blocksize, blocksize);
+    return ev_block;
+  }
 
-    // Copy blocked matrix to contiguous column-major format using SYCL
-    const T* B_data = B.data();
-    const Index B_block_cols = B.block_cols();
-    queue
-        .parallel_for(sycl::range<2>(n, n),
-                      [=](sycl::id<2> idx) {
-                        Index row = idx[0];
-                        Index col = idx[1];
-
-                        // Determine which block this element belongs to
-                        Index block_row = row / bs;
-                        Index block_col = col / bs;
-                        Index local_row = row % bs;
-                        Index local_col = col % bs;
-
-                        // Get value from blocked storage (row-major within blocks)
-                        Index block_offset = (block_row * B_block_cols + block_col) * bs * bs;
-                        T value = B_data[block_offset + local_row * bs + local_col];
-
-                        // Store in column-major dense format
-                        B_dense[col * n + row] = value;
-                      })
-        .wait();
-
-    // Compute eigenvalues and eigenvectors using LAPACK syevd
-    std::int64_t lda = n;
-    std::int64_t scratchpad_size = oneapi::math::lapack::syevd_scratchpad_size<T>(queue, oneapi::math::job::vec, oneapi::math::uplo::lower, n, lda);
-
-    T* scratchpad = sycl::malloc_shared<T>(static_cast<std::size_t>(scratchpad_size), queue);
-
-    // Compute eigendecomposition (B_dense will be overwritten with eigenvectors)
-    oneapi::math::lapack::syevd(queue, oneapi::math::job::vec, oneapi::math::uplo::lower, n, B_dense, lda, eigvals, scratchpad, scratchpad_size).wait();
-
-    // Copy eigenvectors from column-major dense format back to blocked format
-    T* eigvecs_data = eigvecs.data();
-    const Index eigvecs_block_cols = eigvecs.block_cols();
-    queue
-        .parallel_for(sycl::range<2>(n, n),
-                      [=](sycl::id<2> idx) {
-                        Index row = idx[0];
-                        Index col = idx[1];
-
-                        // Determine which block this element belongs to
-                        Index block_row = row / bs;
-                        Index block_col = col / bs;
-                        Index local_row = row % bs;
-                        Index local_col = col % bs;
-
-                        // Get value from column-major dense format
-                        T value = B_dense[col * n + row];
-
-                        // Store in blocked storage (row-major within blocks)
-                        Index block_offset = (block_row * eigvecs_block_cols + block_col) * bs * bs;
-                        eigvecs_data[block_offset + local_row * bs + local_col] = value;
-                      })
-        .wait();
-
-    sycl::free(scratchpad, queue);
-    sycl::free(B_dense, queue);
+  // Compute the column-wise 2-norms of the columns in B and return them on the host
+  std::vector<T> two_norm_on_host(typename BlockMultivector::BlockMatrix::BlockView B)
+  {
+    assert(false && "not implemented");
+    return {};
   }
 
 private:
@@ -177,7 +159,7 @@ private:
   // Diagonal entries
   T* diag = nullptr;
 
-  // Scratch space for orthonormalization
-  T* ortho_scratchpad = nullptr;
-  bool ortho_scratchpad_initialized = false;
+  // Eigenvectors and eigenvalues
+  T* eigenvalues;
+  typename BlockMultivector::BlockMatrix eigenvectors;
 };

@@ -27,3 +27,4 @@
 # endforeach()
 
 add_subdirectory(ginkgo)
+add_subdirectory(sycl)

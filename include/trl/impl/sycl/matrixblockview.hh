@@ -1,12 +1,12 @@
 #pragma once
 
 #include <cassert>
+#include <span>
 #include <vector>
 
-#include <oneapi/math.hpp>
 #include <sycl/sycl.hpp>
 
-namespace trl {
+namespace trl::sycl {
 template <class T, unsigned int bs>
 class MatrixBlockView {
 public:
@@ -14,7 +14,7 @@ public:
   static constexpr unsigned int rows = bs;
   static constexpr unsigned int cols = bs;
 
-  MatrixBlockView(sycl::queue* queue, T* data)
+  MatrixBlockView(::sycl::queue* queue, T* data)
       : data(data)
       , queue(queue)
   {
@@ -36,7 +36,7 @@ public:
    *  Copies the data from source into this view. Both views must have
    *  the same dimensions (bs × bs).
    */
-  void copy_from(const MatrixBlockView& source) { queue->memcpy(data, source.data, bs * bs * sizeof(T)).wait(); }
+  void copy_from(const MatrixBlockView& source) { queue->memcpy(data, source.data, bs * bs * sizeof(T)); }
 
   /** @brief Copy and transpose data from another matrix block view
    *
@@ -47,19 +47,17 @@ public:
   {
     T* dest_ptr = data;
     T* src_ptr = source.data;
-    queue
-        ->submit([&](sycl::handler& h) {
-          h.parallel_for(sycl::range<2>(bs, bs), [=](sycl::id<2> idx) {
-            const auto i = idx[0];
-            const auto j = idx[1];
-            dest_ptr[i * bs + j] = src_ptr[j * bs + i];
-          });
-        })
-        .wait();
+    queue->submit([&](::sycl::handler& h) {
+      h.parallel_for(::sycl::range<2>(bs, bs), [=](::sycl::id<2> idx) {
+        const auto i = idx[0];
+        const auto j = idx[1];
+        dest_ptr[i * bs + j] = src_ptr[j * bs + i];
+      });
+    });
   }
 
   /** @brief Set all elements of the block to zero */
-  void set_zero() { queue->memset(data, 0, bs * bs * sizeof(T)).wait(); }
+  void set_zero() { queue->memset(data, 0, bs * bs * sizeof(T)); }
 
   /** @brief Set the diagonal elements of the block
    *
@@ -68,18 +66,16 @@ public:
    *
    *  @param values Vector of size bs containing the diagonal values
    */
-  void set_diagonal(T* values)
+  void set_diagonal(std::span<T, bs> values)
   {
     T* dest_ptr = data;
 
-    queue
-        ->submit([&](sycl::handler& h) {
-          h.parallel_for(sycl::range<1>(bs), [=](sycl::id<1> idx) {
-            const auto i = idx[0];
-            dest_ptr[i * bs + i] = values[i];
-          });
-        })
-        .wait();
+    queue->submit([&](::sycl::handler& h) {
+      h.parallel_for(::sycl::range<1>(bs), [=](::sycl::id<1> idx) {
+        const auto i = idx[0];
+        dest_ptr[i * bs + i] = values[i];
+      });
+    });
   }
 
   /** @brief Multiply this block matrix by a small vector
@@ -92,33 +88,9 @@ public:
    *  @param vec Input vector of size bs
    *  @param result Output vector of size bs (will be overwritten)
    */
-  void mult(const std::vector<T>& vec, std::vector<T>& result) const
-  {
-    assert(vec.size() == bs);
-    assert(result.size() == bs);
+  void mult(const std::vector<T>& vec, std::vector<T>& result) const { assert(false && "not implemented"); }
 
-    // Allocate device memory for input and output vectors
-    T* vec_device = sycl::malloc_shared<T>(bs, *queue);
-    T* result_device = sycl::malloc_shared<T>(bs, *queue);
-
-    // Copy input to device
-    queue->memcpy(vec_device, vec.data(), bs * sizeof(T)).wait();
-
-    // Use oneMATH gemv for matrix-vector multiplication
-    oneapi::math::blas::row_major::gemv(*queue, oneapi::math::transpose::nontrans, bs, bs, T(1.0), data, bs, vec_device, 1, T(0.0), result_device, 1).wait();
-
-    // Copy result back to host
-    queue->memcpy(result.data(), result_device, bs * sizeof(T)).wait();
-
-    // Free device memory
-    sycl::free(vec_device, *queue);
-    sycl::free(result_device, *queue);
-  }
-
-  void mult(MatrixBlockView B, MatrixBlockView C)
-  {
-    oneapi::math::blas::row_major::gemm(*queue, oneapi::math::transpose::nontrans, oneapi::math::transpose::nontrans, bs, bs, bs, 1., data, bs, B.data, bs, 0., C.data, bs).wait();
-  }
+  void mult(MatrixBlockView B, MatrixBlockView C) { assert(false && "not implemented"); }
 
   /** @brief Element access operator for reading/writing matrix elements
    *
@@ -139,7 +111,7 @@ public:
   T* data;
 
 private:
-  sycl::queue* queue;
+  ::sycl::queue* queue;
 };
 
-} // namespace trl
+} // namespace trl::sycl
