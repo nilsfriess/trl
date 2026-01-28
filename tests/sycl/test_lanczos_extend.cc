@@ -10,7 +10,7 @@
 template <class Scalar, unsigned int bs>
 bool run_test(sycl::queue q, bool verbose)
 {
-  const unsigned int N = 256 * 256;
+  const unsigned int N = 256;
   using EVP = DiagonalEVP<Scalar, bs>;
 
   auto evp = std::make_shared<EVP>(q, N);

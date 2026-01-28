@@ -16,10 +16,13 @@ public:
   using BlockMultivector = trl::sycl::BlockMultivector<T, bs>;
   using BlockView = typename BlockMultivector::BlockView;
 
+  /// Eigenvalue ordering for the projected system
+  enum class EigenvalueOrder { Ascending, Descending };
+
   DiagonalEVP(sycl::queue queue, Index N)
       : queue(queue)
       , N(N)
-      , eigenvectors(queue, 1, 1)
+      , Vtemp(create_multivector(N, bs))
   {
     // Diagonal matrix with entries: diag[i] = i+1 (simpler than (i+1)^2 to avoid large values)
     diag = sycl::malloc_shared<T>(N, queue);
@@ -35,14 +38,10 @@ public:
     T* X_data = X.data;
     T* Y_data = Y.data;
 
-    queue
-        .parallel_for(sycl::range<2>(N, bs),
-                      [=](sycl::id<2> idx) {
-                        Index i = idx[0];
-                        Index j = idx[1];
-                        Y_data[i * bs + j] = diag_ptr[i] * X_data[i * bs + j];
-                      })
-        .wait();
+    queue.parallel_for(sycl::range<1>(N), [=](sycl::id<1> idx) {
+      Index i = idx[0];
+      for (std::size_t j = 0; j < bs; ++j) Y_data[i * bs + j] = diag_ptr[i] * X_data[i * bs + j];
+    });
   }
 
   void dot(BlockView X, BlockView Y, typename BlockMultivector::BlockMatrix::BlockView Z) { X.dot(Y, Z); }
@@ -92,11 +91,9 @@ public:
                                     // In our row-major view, A contains (U^{-T})^T = U^{-1}
 
     // Use temporary to avoid aliasing
-    auto V_temp = create_multivector(V.rows(), bs);
-    auto V_temp_block = V_temp.block_view(0);
-    V.mult(R, V_temp_block); // V_temp = V * U^{-1}
-    queue.wait();            // Wait for mult to complete
-    V.copy_from(V_temp_block);
+    auto Vtemp0 = Vtemp.block_view(0);
+    V.mult(R, Vtemp0); // V_temp = V * U^{-1}
+    V.copy_from(Vtemp0);
     queue.wait(); // Ensure copy completes
 
     // 4. Restore U in R (the Cholesky factor, not its inverse)
@@ -117,25 +114,80 @@ public:
 
   std::vector<T> to_host_data(const T* ptr, std::size_t n)
   {
+    queue.wait();
     std::vector<T> data(n);
     queue.memcpy(data.data(), ptr, n * sizeof(T)).wait();
     return data;
   }
 
-  void solve_small_dense(const typename BlockMultivector::BlockMatrix& B) {
-    assert(false && "not implemented");
+  void solve_small_dense(const typename BlockMultivector::BlockMatrix& B)
+  {
+    queue.wait();
+
+    // B.print();
+
+    const auto n = B.block_rows() * bs;
+    Eigen::Matrix<T, Eigen::Dynamic, Eigen::Dynamic> B_dense(n, n);
+
+    for (std::size_t i = 0; i < B.block_rows(); ++i) {
+      for (std::size_t j = 0; j < B.block_cols(); ++j) {
+        auto block = B.block_view(i, j);
+        for (unsigned int bi = 0; bi < bs; ++bi)
+          for (unsigned int bj = 0; bj < bs; ++bj) B_dense(i * bs + bi, j * bs + bj) = block(bi, bj);
+      }
+    }
+
+    // Compute eigendecomposition
+    Eigen::SelfAdjointEigenSolver<Eigen::Matrix<T, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>> solver(B_dense);
+    if (solver.info() != Eigen::Success) {
+      std::cerr << "Eigendecomposition info: " << (int)solver.info() << std::endl;
+      throw std::runtime_error("Eigendecomposition failed");
+    }
+
+    // Get the eigenvalues from Eigen (in ascending order by default)
+    // For Descending order (e.g., shift-invert), reverse to get largest first
+    if (eigenvalues == nullptr) eigenvalues = sycl::malloc_shared<T>(n, queue);
+
+    if (eigenvalue_order_ == EigenvalueOrder::Descending) {
+      // Reverse order: largest eigenvalues first
+      for (std::size_t i = 0; i < n; ++i) eigenvalues[i] = solver.eigenvalues()(n - 1 - i);
+    }
+    else {
+      // Ascending order: smallest eigenvalues first (default)
+      for (std::size_t i = 0; i < n; ++i) eigenvalues[i] = solver.eigenvalues()(i);
+    }
+
+    // Store eigenvectors in BlockMatrix format
+    if (!eigenvectors) {
+      eigenvectors = std::make_unique<typename BlockMultivector::BlockMatrix>(create_blockmatrix(B.block_rows(), B.block_cols()));
+      queue.wait();
+    }
+    for (std::size_t i = 0; i < B.block_rows(); ++i) {
+      for (std::size_t j = 0; j < B.block_cols(); ++j) {
+        auto block = eigenvectors->block_view(i, j);
+        const std::size_t n_cols = B.block_cols() * bs;
+        for (unsigned int bi = 0; bi < bs; ++bi) {
+          for (unsigned int bj = 0; bj < bs; ++bj) {
+            if (eigenvalue_order_ == EigenvalueOrder::Descending) {
+              // Reverse the column order for descending
+              block(bi, bj) = solver.eigenvectors()(i * bs + bi, n_cols - 1 - (j * bs + bj));
+            }
+            else {
+              // Normal order for ascending
+              block(bi, bj) = solver.eigenvectors()(i * bs + bi, j * bs + bj);
+            }
+          }
+        }
+      }
+    }
   }
 
-  std::span<T, std::dynamic_extent> get_current_eigenvalues() const
-  {
-    assert(false && "not implemented");
-    return std::span<T, std::dynamic_extent>(eigenvalues, eigenvectors.block_rows() * bs);
-  }
+  std::span<T, std::dynamic_extent> get_current_eigenvalues() const { return std::span<T, std::dynamic_extent>(eigenvalues, eigenvectors->block_rows() * bs); }
 
   const typename BlockMultivector::BlockMatrix& get_current_eigenvectors() const
   {
-    assert(false && "not implemented");
-    return eigenvectors;
+    assert(eigenvectors);
+    return *eigenvectors;
   }
 
   std::span<T, blocksize> get_eigenvalues_block(std::size_t block)
@@ -147,19 +199,29 @@ public:
   // Compute the column-wise 2-norms of the columns in B and return them on the host
   std::vector<T> two_norm_on_host(typename BlockMultivector::BlockMatrix::BlockView B)
   {
-    assert(false && "not implemented");
-    return {};
+    queue.wait();
+    std::vector<T> norms_host(bs, 0);
+
+    for (std::size_t i = 0; i < bs; ++i)
+      for (std::size_t j = 0; j < bs; ++j) norms_host[j] += B(i, j) * B(i, j);
+
+    for (auto& n : norms_host) n = std::sqrt(n);
+    return norms_host;
   }
 
 private:
+  EigenvalueOrder eigenvalue_order_ = EigenvalueOrder::Ascending;
+
   sycl::queue queue;
 
   Index N;
+
+  BlockMultivector Vtemp;
 
   // Diagonal entries
   T* diag = nullptr;
 
   // Eigenvectors and eigenvalues
-  T* eigenvalues;
-  typename BlockMultivector::BlockMatrix eigenvectors;
+  T* eigenvalues = nullptr;
+  std::unique_ptr<typename BlockMultivector::BlockMatrix> eigenvectors;
 };

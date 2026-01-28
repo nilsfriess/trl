@@ -23,7 +23,59 @@ public:
     queue.memset(data_, 0, block_rows * block_cols * bs * bs * sizeof(T)).wait();
   }
 
-  ~BlockMatrix() { ::sycl::free(data_, queue); }
+  ~BlockMatrix() {
+    if (data_) {
+      ::sycl::free(data_, queue);
+    }
+  }
+
+  BlockMatrix(const BlockMatrix& other)
+      : queue(other.queue)
+      , block_rows_(other.block_rows_)
+      , block_cols_(other.block_cols_)
+  {
+    data_ = ::sycl::malloc_shared<T>(block_rows_ * block_cols_ * bs * bs, queue);
+    queue.memcpy(data_, other.data_, block_rows_ * block_cols_ * bs * bs * sizeof(T)).wait();
+  }
+
+  BlockMatrix& operator=(const BlockMatrix& other)
+  {
+    if (this != &other) {
+      ::sycl::free(data_, queue);
+      queue = other.queue;
+      block_rows_ = other.block_rows_;
+      block_cols_ = other.block_cols_;
+      data_ = ::sycl::malloc_shared<T>(block_rows_ * block_cols_ * bs * bs, queue);
+      queue.memcpy(data_, other.data_, block_rows_ * block_cols_ * bs * bs * sizeof(T)).wait();
+    }
+    return *this;
+  }
+
+  BlockMatrix(BlockMatrix&& other) noexcept
+      : queue(std::move(other.queue))
+      , block_rows_(other.block_rows_)
+      , block_cols_(other.block_cols_)
+      , data_(other.data_)
+  {
+    other.data_ = nullptr;
+    other.block_rows_ = 0;
+    other.block_cols_ = 0;
+  }
+
+  BlockMatrix& operator=(BlockMatrix&& other) noexcept
+  {
+    if (this != &other) {
+      ::sycl::free(data_, queue);
+      queue = std::move(other.queue);
+      block_rows_ = other.block_rows_;
+      block_cols_ = other.block_cols_;
+      data_ = other.data_;
+      other.data_ = nullptr;
+      other.block_rows_ = 0;
+      other.block_cols_ = 0;
+    }
+    return *this;
+  }
 
   std::size_t block_rows() const { return block_rows_; }
   std::size_t block_cols() const { return block_cols_; }
@@ -46,6 +98,8 @@ public:
 
   void print(bool with_separator = true, bool scientific = true, int precision = 8, T tolerance = 1e-10) const
   {
+    queue.wait();
+    
     if (with_separator) {
       std::cout << "--------------------------------------------------\n";
       std::cout << "Block matrix of order " << block_rows_ << "x" << block_cols_ << "\n";
@@ -102,7 +156,7 @@ public:
   }
 
 private:
-  ::sycl::queue queue;
+  mutable ::sycl::queue queue;
 
   std::size_t block_rows_;
   std::size_t block_cols_;

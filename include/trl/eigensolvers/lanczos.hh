@@ -37,11 +37,8 @@ public:
     // The maximum number of orthogonal vectors is evp->size()
     // We need ncv + blocksize vectors (ncv blocks plus one trailing block)
     if (ncv + blocksize > evp->size()) {
-      throw std::invalid_argument(
-          "ncv (" + std::to_string(ncv) + ") + blocksize (" + std::to_string(blocksize) +
-          ") exceeds problem dimension (" + std::to_string(evp->size()) +
-          "). Krylov subspace would be exhausted. Reduce ncv to at most " +
-          std::to_string(evp->size() - blocksize) + ".");
+      throw std::invalid_argument("ncv (" + std::to_string(ncv) + ") + blocksize (" + std::to_string(blocksize) + ") exceeds problem dimension (" + std::to_string(evp->size()) +
+                                  "). Krylov subspace would be exhausted. Reduce ncv to at most " + std::to_string(evp->size() - blocksize) + ".");
     }
   }
 
@@ -61,7 +58,7 @@ public:
     unsigned int k = 0;
 
     while (result.iterations < max_restarts) {
-      // std::cout << "Restart iteration " << result.iterations << "\n";
+      std::cout << "Restart iteration " << result.iterations << " (k=" << k << ", nev/bs=" << nev / blocksize << ", ncv/bs=" << ncv / blocksize << ")\n";
       result.iterations++;
 
       // Extend the basis to the maximum allowed size
@@ -220,18 +217,25 @@ public:
       evp->orthonormalize(Vk1, beta);
 
       // Store beta in the block tridiagonal matrix T
-      // beta is lower triangular from Cholesky factorization
-      // T should be symmetric, so T[i+1,i] = beta^T and T[i,i+1] = beta
-      assert(k + 1 < T.block_rows());
-      auto Ti1_i = T.block_view(k + 1, k);
-      Ti1_i.copy_from_transpose(beta);
+      // beta is upper triangular Cholesky factor: V_old = V_new * beta
+      // T should be symmetric, so T[i+1,i] = beta and T[i,i+1] = beta^T
+      if (k + 1 < T.block_rows()) {
+        auto Ti1_i = T.block_view(k + 1, k);
+        Ti1_i.copy_from(beta);
 
-      auto Ti_i1 = T.block_view(k, k + 1);
-      Ti_i1.copy_from(beta);
+        auto Ti_i1 = T.block_view(k, k + 1);
+        Ti_i1.copy_from_transpose(beta);
 
-      // T.print();
+        // T.print();
 
-      k += 1;
+        k += 1;
+      }
+      else {
+        // We've exhausted the Krylov subspace (k+1 == ncv/blocksize)
+        // We cannot extend further, so we must check convergence and return
+        // T.print();
+        break;
+      }
     }
 
     // std::cout << "Maximum number of restarts (" << max_restarts << ") reached. Converged " << nconv * blocksize << " out of " << nev << " eigenvalues.\n";

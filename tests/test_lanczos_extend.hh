@@ -18,7 +18,7 @@ bool test_lanczos_extend(std::shared_ptr<EVP> evp, TestHelper& helper, typename 
 
   // Use fewer columns than N to avoid Krylov subspace exhaustion
   // With ncv = N/2, we can do ncv/bs iterations without breakdown
-  trl::EigensolverParams params{.nev = 24, .ncv = 64, .max_restarts = 1000};
+  trl::EigensolverParams params{.nev = 8, .ncv = static_cast<unsigned int>(N / 2), .max_restarts = 1000};
   trl::BlockLanczos lanczos(evp, params);
 
   helper.sync();

@@ -45,15 +45,11 @@ public:
    */
   void copy_from_transpose(const MatrixBlockView& source)
   {
+    queue->wait();
     T* dest_ptr = data;
     T* src_ptr = source.data;
-    queue->submit([&](::sycl::handler& h) {
-      h.parallel_for(::sycl::range<2>(bs, bs), [=](::sycl::id<2> idx) {
-        const auto i = idx[0];
-        const auto j = idx[1];
-        dest_ptr[i * bs + j] = src_ptr[j * bs + i];
-      });
-    });
+    for (std::size_t i = 0; i < bs; ++i)
+      for (std::size_t j = 0; j < bs; ++j) dest_ptr[i * bs + j] = src_ptr[j * bs + i];
   }
 
   /** @brief Set all elements of the block to zero */
@@ -68,14 +64,9 @@ public:
    */
   void set_diagonal(std::span<T, bs> values)
   {
+    queue->wait();
     T* dest_ptr = data;
-
-    queue->submit([&](::sycl::handler& h) {
-      h.parallel_for(::sycl::range<1>(bs), [=](::sycl::id<1> idx) {
-        const auto i = idx[0];
-        dest_ptr[i * bs + i] = values[i];
-      });
-    });
+    for (std::size_t i = 0; i < bs; ++i) dest_ptr[i * bs + i] = values[i];
   }
 
   /** @brief Multiply this block matrix by a small vector
@@ -90,7 +81,18 @@ public:
    */
   void mult(const std::vector<T>& vec, std::vector<T>& result) const { assert(false && "not implemented"); }
 
-  void mult(MatrixBlockView B, MatrixBlockView C) { assert(false && "not implemented"); }
+  void mult(MatrixBlockView B, MatrixBlockView C)
+  {
+    queue->wait();
+
+    // C = this * B (matrix-matrix multiplication)
+    for (std::size_t i = 0; i < bs; ++i) {
+      for (std::size_t j = 0; j < bs; ++j) {
+        C(i, j) = 0;
+        for (std::size_t k = 0; k < bs; ++k) C(i, j) += (*this)(i, k) * B(k, j);
+      }
+    }
+  }
 
   /** @brief Element access operator for reading/writing matrix elements
    *

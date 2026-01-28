@@ -54,7 +54,7 @@ public:
   void copy_from(const BlockView& source)
   {
     assert(rows_ == source.rows_);
-    q->memcpy(data, source.data, rows_ * cols_ * sizeof(T)).wait();
+    q->memcpy(data, source.data, rows_ * cols_ * sizeof(T));
   }
 
   void dot(BlockView B, MatrixBlockView C)

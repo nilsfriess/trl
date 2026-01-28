@@ -41,8 +41,8 @@ public:
   std::vector<typename EVP::Scalar> to_host_data(std::span<typename EVP::Scalar, std::dynamic_extent> data)
   {
     sync();
-    std::vector<typename EVP::Scalar> host_data(data.extent);
-    queue.memcpy(host_data.data(), data.data(), data.extent * sizeof(typename EVP::Scalar)).wait();
+    std::vector<typename EVP::Scalar> host_data(data.size());
+    queue.memcpy(host_data.data(), data.data(), data.size_bytes()).wait();
     return host_data;
   }
 

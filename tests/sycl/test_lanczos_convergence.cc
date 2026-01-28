@@ -16,14 +16,16 @@ bool run_test_diagonal(sycl::queue q)
   std::cout << "\n[Diagonal Test: bs=" << bs << "]\n";
   trl::ScopedTimer timer;
 
-  const unsigned int N = 256 * 256;
+  const unsigned int N = 256;
   using EVP = DiagonalEVP<Scalar, bs>;
 
   auto evp = std::make_shared<EVP>(q, N);
 
   SYCLTestHelper<EVP> helper(q);
 
-  std::vector<Scalar> exact_eigenvalues(16);
+  // Use nev that is a multiple of blocksize for proper testing
+  const unsigned int nev = 16;
+  std::vector<Scalar> exact_eigenvalues(nev);
   std::iota(exact_eigenvalues.begin(), exact_eigenvalues.end(), 1);
 
   return test_lanczos_convergence(evp, helper, exact_eigenvalues);

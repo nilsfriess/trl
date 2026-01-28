@@ -67,7 +67,7 @@ public:
   {
     if (this != &other) {
       if (data) ::sycl::free(data, queue);
-      queue = std::move(other.queue);
+      queue = other.queue;
       rows = other.rows;
       blocks_ = other.blocks_;
       data = other.data;
