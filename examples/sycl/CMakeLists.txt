@@ -9,6 +9,11 @@ if(${WITH_SYCL_BACKEND})
     <Eigen/Dense>
     <Eigen/Sparse>
   )
+
+  add_executable(csrtest csrtest.cc)
+  target_include_directories(csrtest PRIVATE ../../include)
+  target_link_libraries(csrtest PRIVATE trl::trl)
+  add_sycl_to_target(TARGET csrtest)
   
   # target_link_libraries(laplace_example_sycl PRIVATE ONEMATH::onemath)
   # add_sycl_to_target(TARGET laplace_example_sycl SOURCES sycl/laplace.cc)
