@@ -14,6 +14,8 @@ namespace trl::sycl {
 template <class T, std::size_t cols_>
 class BlockView {
   static constexpr size_t local_size = 128;
+  static constexpr size_t cache_line_size = 64;
+  static constexpr size_t padded_partial_size = ((cols_ * cols_ * sizeof(T) + cache_line_size - 1) / cache_line_size) * cache_line_size / sizeof(T);
 
 public:
   using EntryType = T;
@@ -28,8 +30,12 @@ public:
     // Query once at startup
     size_t num_cu = q->get_device().get_info<::sycl::info::device::max_compute_units>();
 
-    size_t num_groups = num_cu * 6;
+    size_t num_groups = num_cu * 4;
     global_size = local_size * num_groups;
+
+    // For CPU
+    n_threads = std::max<std::size_t>(1, q->get_device().template get_info<::sycl::info::device::max_compute_units>() * 8);
+    partialC = ::sycl::malloc_shared<T>(n_threads * padded_partial_size, *q);
   }
 
   // Default copy operations (copying a view is cheap)
@@ -54,17 +60,17 @@ public:
   void copy_from(const BlockView& source)
   {
     assert(rows_ == source.rows_);
-    q->memcpy(data, source.data, rows_ * cols_ * sizeof(T));
+    q->memcpy(data, source.data, rows_ * cols_ * sizeof(T)).wait();
   }
 
   void dot(BlockView B, MatrixBlockView C)
   {
     const auto n = rows();
-    const auto m = cols();
+    constexpr auto m = cols_;
+    constexpr auto mm = cols_ * cols_;
 
-    // Zero the output matrix first
     C.set_zero();
-
+#if 0
     q->submit([&](auto& cgh) {
       auto* a = data;
       auto* b = B.data;
@@ -90,6 +96,41 @@ public:
         }
       });
     });
+#else
+    // Parallel computation of partial results
+    q->submit([&, this](auto& cgh) {
+      auto* a = data;
+      auto* b = B.data;
+      auto* c = C.data;
+
+      const std::size_t num_work_items = 512 * q->get_device().get_info<::sycl::info::device::max_compute_units>();
+      cgh.parallel_for(::sycl::range<1>(num_work_items), [=](::sycl::id<1> idx) {
+        auto tid = idx[0];
+        auto stride = num_work_items;
+
+        T c_acc[mm] = {0.};
+
+        for (std::size_t k = tid / cols_; k < n; k += stride / cols_) {
+          T a_col[m];
+          // T b_row[m];
+
+          for (unsigned int i = 0; i < m; ++i) a_col[i] = a[k * m + i];
+          // for (unsigned int i = 0; i < m; ++i) b_row[i] = b[k * m + i];
+
+          auto j = tid % m;
+          for (unsigned int i = 0; i < m; ++i)
+            // for (unsigned int j = 0; j < m; ++j)
+            c_acc[i * m + j] += a_col[i] * b[k * m + j];
+        }
+
+        for (unsigned int i = 0; i < mm; ++i) {
+          auto atomic_c = ::sycl::atomic_ref<T, ::sycl::memory_order::relaxed, ::sycl::memory_scope::device, ::sycl::access::address_space::global_space>(c[i]);
+          atomic_c.fetch_add(c_acc[i]);
+          // c[i] = c_acc[i];
+        }
+      });
+    });
+#endif
   }
 
   void mult(MatrixBlockView B, BlockView C)
@@ -237,6 +278,9 @@ private:
   ::sycl::queue* q;
   const std::size_t rows_;
 
-  std::size_t global_size{}; // for dot product
+  T* partialC; // for the dot product
+
+  std::size_t global_size{}; // for dot product (GPU)
+  std::size_t n_threads{};   // for dot product (CPU)
 };
 } // namespace trl::sycl

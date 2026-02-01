@@ -14,6 +14,14 @@ if(${WITH_SYCL_BACKEND})
   target_include_directories(csrtest PRIVATE ../../include)
   target_link_libraries(csrtest PRIVATE trl::trl)
   add_sycl_to_target(TARGET csrtest)
+
+  add_executable(benchmark_sycl benchmark.cc)
+  target_include_directories(benchmark_sycl PRIVATE ../../include)
+  target_link_libraries(benchmark_sycl PRIVATE trl::trl)
+  add_sycl_to_target(TARGET benchmark_sycl)
+  target_precompile_headers(benchmark_sycl PRIVATE
+    <sycl/sycl.hpp>
+  )
   
   # target_link_libraries(laplace_example_sycl PRIVATE ONEMATH::onemath)
   # add_sycl_to_target(TARGET laplace_example_sycl SOURCES sycl/laplace.cc)
