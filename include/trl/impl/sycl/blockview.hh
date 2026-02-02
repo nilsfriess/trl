@@ -73,45 +73,54 @@ public:
 
       const auto num_cu = q->get_device().get_info<::sycl::info::device::max_compute_units>();
       // More tiles = fewer workers per tile needed to saturate GPU
-      const auto workers_per_tile = (num_tiles >= 16) ? 64 * num_cu : 256 * num_cu;
+      constexpr std::size_t wg_size = 256;
+      const auto num_wg_per_tile = (num_tiles >= 16) ? 64 * num_cu / wg_size : 256 * num_cu / wg_size;
+      const auto workers_per_tile = num_wg_per_tile * wg_size;
       const auto total_workers = num_tiles * workers_per_tile;
 
-      cgh.parallel_for(::sycl::range<1>(total_workers), [=](auto global_id) {
-        auto tile_idx = global_id % num_tiles;
-        auto worker_id = global_id / num_tiles;
+      cgh.parallel_for(
+          ::sycl::nd_range<1>(total_workers, wg_size), [=](::sycl::nd_item<1> item) {
+            auto global_id = item.get_global_linear_id();
+            auto tile_idx = global_id % num_tiles;
+            auto worker_id = global_id / num_tiles;
 
-        auto tile_m = tile_idx / num_tiles_n;
-        auto tile_n = tile_idx % num_tiles_n;
+            auto tile_m = tile_idx / num_tiles_n;
+            auto tile_n = tile_idx % num_tiles_n;
 
-        auto m_start = tile_m * TM;
-        auto n_start = tile_n * TN;
+            auto m_start = tile_m * TM;
+            auto n_start = tile_n * TN;
 
-        T c_local[TM][TN] = {};
+            T c_local[TM][TN] = {};
 
-        for (std::size_t k = worker_id; k < K; k += workers_per_tile) {
-          // Load A row segment into registers
-          T a_reg[TM];
-          for (unsigned int tm = 0; tm < TM; ++tm) {
-            a_reg[tm] = A[k * M + (m_start + tm)];
-          }
+            for (std::size_t k = worker_id; k < K; k += workers_per_tile) {
+              // Load A row segment into registers
+              T a_reg[TM];
+              for (unsigned int tm = 0; tm < TM; ++tm) {
+                a_reg[tm] = A[k * M + (m_start + tm)];
+              }
 
-          // Load B row segment and compute outer product
-          for (unsigned int tn = 0; tn < TN; ++tn) {
-            T b_val = B[k * N + (n_start + tn)];
-            for (unsigned int tm = 0; tm < TM; ++tm) {
-              c_local[tm][tn] += a_reg[tm] * b_val;
+              // Load B row segment and compute outer product
+              for (unsigned int tn = 0; tn < TN; ++tn) {
+                T b_val = B[k * N + (n_start + tn)];
+                for (unsigned int tm = 0; tm < TM; ++tm) {
+                  c_local[tm][tn] += a_reg[tm] * b_val;
+                }
+              }
             }
-          }
-        }
 
-        // Atomic accumulate to global
-        for (unsigned int tm = 0; tm < TM; ++tm) {
-          for (unsigned int tn = 0; tn < TN; ++tn) {
-            ::sycl::atomic_ref<T, ::sycl::memory_order::relaxed, ::sycl::memory_scope::device, ::sycl::access::address_space::global_space> c_ref(C[(m_start + tm) * N + (n_start + tn)]);
-            c_ref += c_local[tm][tn];
-          }
-        }
-      });
+            // Sub-group reduction: reduce within sub-group first, then only leader does atomic
+            auto sg = item.get_sub_group();
+            for (unsigned int tm = 0; tm < TM; ++tm) {
+              for (unsigned int tn = 0; tn < TN; ++tn) {
+                T sum = ::sycl::reduce_over_group(sg, c_local[tm][tn], ::sycl::plus<T>());
+                if (sg.get_local_linear_id() == 0) {
+                  ::sycl::atomic_ref<T, ::sycl::memory_order::relaxed, ::sycl::memory_scope::device, ::sycl::access::address_space::global_space> c_ref(
+                      C[(m_start + tm) * N + (n_start + tn)]);
+                  c_ref += sum;
+                }
+              }
+            }
+          });
     });
   }
 
