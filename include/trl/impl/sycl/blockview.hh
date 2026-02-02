@@ -47,6 +47,7 @@ public:
     q->memcpy(data, source.data, rows_ * cols_ * sizeof(T)).wait();
   }
 
+  template <int worker_mult = 64>
   void dot(BlockView Bv, MatrixBlockView Cv)
   {
     // C = A^T * B where A is K×M, B is K×N, C is M×N
@@ -72,9 +73,9 @@ public:
       auto* C = Cv.data;
 
       const auto num_cu = q->get_device().get_info<::sycl::info::device::max_compute_units>();
-      // More tiles = fewer workers per tile needed to saturate GPU
+      // worker_mult controls parallelism: higher = more workers, less work per thread
       constexpr std::size_t wg_size = 256;
-      const auto num_wg_per_tile = (num_tiles >= 16) ? 64 * num_cu / wg_size : 256 * num_cu / wg_size;
+      const auto num_wg_per_tile = std::max<std::size_t>(1, worker_mult * num_cu / wg_size);
       const auto workers_per_tile = num_wg_per_tile * wg_size;
       const auto total_workers = num_tiles * workers_per_tile;
 
