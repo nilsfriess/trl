@@ -54,55 +54,64 @@ public:
     constexpr auto M = cols_;
     constexpr auto N = cols_;
 
-    // For larger blocksizes, split output matrix across work-items within a work-group
-    // Each work-item handles a subset of output elements to reduce register pressure
-    constexpr unsigned int wg_size = 64;
-    constexpr unsigned int elems_per_wi = (M * N + wg_size - 1) / wg_size;
-    constexpr unsigned int actual_wis = (M * N + elems_per_wi - 1) / elems_per_wi;
-
     Cv.set_zero();
+
+    // Choose tile size to balance register pressure vs parallelism:
+    // - For M*N <= 16: use full M×N (1 tile)
+    // - For M*N = 64 (blocksize 8): use 2×2 tiles → 16 tiles, 4 registers per tile
+    // - For M*N = 256 (blocksize 16): use 4×4 tiles → 16 tiles, 16 registers per tile
+    constexpr unsigned int TM = (M * N <= 16) ? M : ((M * N <= 64) ? 2 : 4);
+    constexpr unsigned int TN = (M * N <= 16) ? N : ((M * N <= 64) ? 2 : 4);
+    constexpr unsigned int num_tiles_m = (M + TM - 1) / TM;
+    constexpr unsigned int num_tiles_n = (N + TN - 1) / TN;
+    constexpr unsigned int num_tiles = num_tiles_m * num_tiles_n;
+
     q->submit([&](::sycl::handler& cgh) {
       auto* A = this->data;
       auto* B = Bv.data;
       auto* C = Cv.data;
 
-      const auto num_wg = 64 * q->get_device().get_info<::sycl::info::device::max_compute_units>();
+      const auto num_cu = q->get_device().get_info<::sycl::info::device::max_compute_units>();
+      // More tiles = fewer workers per tile needed to saturate GPU
+      const auto workers_per_tile = (num_tiles >= 16) ? 64 * num_cu : 256 * num_cu;
+      const auto total_workers = num_tiles * workers_per_tile;
 
-      cgh.parallel_for(
-          ::sycl::nd_range<1>(num_wg * wg_size, wg_size), [=](::sycl::nd_item<1> item) {
-            auto wg_id = item.get_group_linear_id();
-            auto local_id = item.get_local_linear_id();
+      cgh.parallel_for(::sycl::range<1>(total_workers), [=](auto global_id) {
+        auto tile_idx = global_id % num_tiles;
+        auto worker_id = global_id / num_tiles;
 
-            // Work-items with local_id >= actual_wis don't contribute output elements
-            // but still participate in loading for coalesced access
-            auto my_start = local_id * elems_per_wi;
-            auto my_end = (my_start + elems_per_wi < M * N) ? my_start + elems_per_wi : M * N;
-            if (local_id >= actual_wis) {
-              my_start = 0;
-              my_end = 0;
+        auto tile_m = tile_idx / num_tiles_n;
+        auto tile_n = tile_idx % num_tiles_n;
+
+        auto m_start = tile_m * TM;
+        auto n_start = tile_n * TN;
+
+        T c_local[TM][TN] = {};
+
+        for (std::size_t k = worker_id; k < K; k += workers_per_tile) {
+          // Load A row segment into registers
+          T a_reg[TM];
+          for (unsigned int tm = 0; tm < TM; ++tm) {
+            a_reg[tm] = A[k * M + (m_start + tm)];
+          }
+
+          // Load B row segment and compute outer product
+          for (unsigned int tn = 0; tn < TN; ++tn) {
+            T b_val = B[k * N + (n_start + tn)];
+            for (unsigned int tm = 0; tm < TM; ++tm) {
+              c_local[tm][tn] += a_reg[tm] * b_val;
             }
+          }
+        }
 
-            T c_local[elems_per_wi] = {};
-
-            for (std::size_t k = wg_id; k < K; k += num_wg) {
-              // Each work-item accumulates its assigned output elements
-              for (unsigned int e = 0; e < my_end - my_start; ++e) {
-                auto elem = my_start + e;
-                auto m = elem / N;
-                auto n = elem % N;
-                c_local[e] += A[k * M + m] * B[k * N + n];
-              }
-            }
-
-            // Atomic accumulate to global
-            for (unsigned int e = 0; e < my_end - my_start; ++e) {
-              auto elem = my_start + e;
-              auto m = elem / N;
-              auto n = elem % N;
-              ::sycl::atomic_ref<T, ::sycl::memory_order::relaxed, ::sycl::memory_scope::device, ::sycl::access::address_space::global_space> c_ref(C[m * N + n]);
-              c_ref += c_local[e];
-            }
-          });
+        // Atomic accumulate to global
+        for (unsigned int tm = 0; tm < TM; ++tm) {
+          for (unsigned int tn = 0; tn < TN; ++tn) {
+            ::sycl::atomic_ref<T, ::sycl::memory_order::relaxed, ::sycl::memory_scope::device, ::sycl::access::address_space::global_space> c_ref(C[(m_start + tm) * N + (n_start + tn)]);
+            c_ref += c_local[tm][tn];
+          }
+        }
+      });
     });
   }
 
@@ -249,6 +258,6 @@ public:
 
 private:
   ::sycl::queue* q;
-  const std::size_t rows_;
+  std::size_t rows_;
 };
 } // namespace trl::sycl
