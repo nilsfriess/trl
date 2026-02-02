@@ -85,26 +85,92 @@ public:
             auto tile_idx = global_id % num_tiles;
             auto worker_id = global_id / num_tiles;
 
+            // Transposed tile mapping: instead of thread ti handling columns [ti*TM, ti*TM+TM),
+            // thread ti handles columns ti, ti+num_tiles_m, ti+2*num_tiles_m, ...
+            // This makes adjacent threads access adjacent memory locations (coalesced).
             auto tile_m = tile_idx / num_tiles_n;
             auto tile_n = tile_idx % num_tiles_n;
 
-            auto m_start = tile_m * TM;
-            auto n_start = tile_n * TN;
+            // With transposed mapping, compute the M indices this tile handles
+            // tile_m selects which "group" of interleaved columns
+            // Elements: tile_m, tile_m + num_tiles_m, tile_m + 2*num_tiles_m, ...
+            unsigned int m_indices[TM];
+            unsigned int n_indices[TN];
+            if constexpr (TM < M) {
+              // Transposed: interleaved pattern for coalesced access
+              for (unsigned int tm = 0; tm < TM; ++tm) {
+                m_indices[tm] = tile_m + tm * num_tiles_m;
+              }
+              for (unsigned int tn = 0; tn < TN; ++tn) {
+                n_indices[tn] = tile_n + tn * num_tiles_n;
+              }
+            } else {
+              // Small blocksize: contiguous (no transpose needed)
+              for (unsigned int tm = 0; tm < TM; ++tm) {
+                m_indices[tm] = tm;
+              }
+              for (unsigned int tn = 0; tn < TN; ++tn) {
+                n_indices[tn] = tn;
+              }
+            }
 
             T c_local[TM][TN] = {};
 
-            for (std::size_t k = worker_id; k < K; k += workers_per_tile) {
-              // Load A row segment into registers
-              T a_reg[TM];
-              for (unsigned int tm = 0; tm < TM; ++tm) {
-                a_reg[tm] = A[k * M + (m_start + tm)];
+            // Use different strategies based on tile size (compile-time known)
+            if constexpr (TM >= 4) {
+              // Leap-frogging (double buffering) for larger tiles: load next iteration's
+              // data while computing on current data to hide memory latency.
+              T a_curr[TM], a_next[TM];
+              T b_curr[TN], b_next[TN];
+
+              // Prefetch first iteration
+              std::size_t k = worker_id;
+              if (k < K) {
+                for (unsigned int tm = 0; tm < TM; ++tm) {
+                  a_next[tm] = A[k * M + m_indices[tm]];
+                }
+                for (unsigned int tn = 0; tn < TN; ++tn) {
+                  b_next[tn] = B[k * N + n_indices[tn]];
+                }
               }
 
-              // Load B row segment and compute outer product
-              for (unsigned int tn = 0; tn < TN; ++tn) {
-                T b_val = B[k * N + (n_start + tn)];
+              // Main loop with prefetching
+              for (; k < K; k += workers_per_tile) {
+                // Current = what we prefetched
+                for (unsigned int tm = 0; tm < TM; ++tm) a_curr[tm] = a_next[tm];
+                for (unsigned int tn = 0; tn < TN; ++tn) b_curr[tn] = b_next[tn];
+
+                // Prefetch next iteration (loads issued early, hide behind compute)
+                std::size_t k_next = k + workers_per_tile;
+                if (k_next < K) {
+                  for (unsigned int tm = 0; tm < TM; ++tm) {
+                    a_next[tm] = A[k_next * M + m_indices[tm]];
+                  }
+                  for (unsigned int tn = 0; tn < TN; ++tn) {
+                    b_next[tn] = B[k_next * N + n_indices[tn]];
+                  }
+                }
+
+                // Compute outer product (happens while loads are in flight)
+                for (unsigned int tn = 0; tn < TN; ++tn) {
+                  for (unsigned int tm = 0; tm < TM; ++tm) {
+                    c_local[tm][tn] += a_curr[tm] * b_curr[tn];
+                  }
+                }
+              }
+            } else {
+              // Simple path for small tiles (TM < 4)
+              for (std::size_t k = worker_id; k < K; k += workers_per_tile) {
+                T a_reg[TM];
                 for (unsigned int tm = 0; tm < TM; ++tm) {
-                  c_local[tm][tn] += a_reg[tm] * b_val;
+                  a_reg[tm] = A[k * M + m_indices[tm]];
+                }
+
+                for (unsigned int tn = 0; tn < TN; ++tn) {
+                  T b_val = B[k * N + n_indices[tn]];
+                  for (unsigned int tm = 0; tm < TM; ++tm) {
+                    c_local[tm][tn] += a_reg[tm] * b_val;
+                  }
                 }
               }
             }
@@ -116,7 +182,7 @@ public:
                 T sum = ::sycl::reduce_over_group(sg, c_local[tm][tn], ::sycl::plus<T>());
                 if (sg.get_local_linear_id() == 0) {
                   ::sycl::atomic_ref<T, ::sycl::memory_order::relaxed, ::sycl::memory_scope::device, ::sycl::access::address_space::global_space> c_ref(
-                      C[(m_start + tm) * N + (n_start + tn)]);
+                      C[m_indices[tm] * N + n_indices[tn]]);
                   c_ref += sum;
                 }
               }
