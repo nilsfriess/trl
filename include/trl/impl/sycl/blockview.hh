@@ -49,10 +49,16 @@ public:
 
   void dot(BlockView Bv, MatrixBlockView Cv)
   {
-    // Notation from https://journals.sagepub.com/doi/epub/10.1177/1094342020965661
+    // C = A^T * B where A is K×M, B is K×N, C is M×N
     const auto K = rows();
     constexpr auto M = cols_;
     constexpr auto N = cols_;
+
+    // For larger blocksizes, split output matrix across work-items within a work-group
+    // Each work-item handles a subset of output elements to reduce register pressure
+    constexpr unsigned int wg_size = 64;
+    constexpr unsigned int elems_per_wi = (M * N + wg_size - 1) / wg_size;
+    constexpr unsigned int actual_wis = (M * N + elems_per_wi - 1) / elems_per_wi;
 
     Cv.set_zero();
     q->submit([&](::sycl::handler& cgh) {
@@ -60,22 +66,43 @@ public:
       auto* B = Bv.data;
       auto* C = Cv.data;
 
-      const auto stride = 256 * q->get_device().get_info<::sycl::info::device::max_compute_units>();
+      const auto num_wg = 64 * q->get_device().get_info<::sycl::info::device::max_compute_units>();
 
-      cgh.parallel_for(::sycl::range<1>(stride), [=](auto id) {
-        T c_local[M][N] = {};
+      cgh.parallel_for(
+          ::sycl::nd_range<1>(num_wg * wg_size, wg_size), [=](::sycl::nd_item<1> item) {
+            auto wg_id = item.get_group_linear_id();
+            auto local_id = item.get_local_linear_id();
 
-        for (std::size_t k = id; k < K; k += stride) {
-          for (unsigned int m = 0; m < M; ++m)
-            for (unsigned int n = 0; n < N; ++n) c_local[m][n] += A[k * cols_ + m] * B[k * cols_ + n];
-        }
+            // Work-items with local_id >= actual_wis don't contribute output elements
+            // but still participate in loading for coalesced access
+            auto my_start = local_id * elems_per_wi;
+            auto my_end = (my_start + elems_per_wi < M * N) ? my_start + elems_per_wi : M * N;
+            if (local_id >= actual_wis) {
+              my_start = 0;
+              my_end = 0;
+            }
 
-        for (unsigned int m = 0; m < M; ++m)
-          for (unsigned int n = 0; n < N; ++n) {
-            ::sycl::atomic_ref<T, ::sycl::memory_order::relaxed, ::sycl::memory_scope::device, ::sycl::access::address_space::global_space> c_ref(C[m * cols_ + n]);
-            c_ref += c_local[m][n];
-          }
-      });
+            T c_local[elems_per_wi] = {};
+
+            for (std::size_t k = wg_id; k < K; k += num_wg) {
+              // Each work-item accumulates its assigned output elements
+              for (unsigned int e = 0; e < my_end - my_start; ++e) {
+                auto elem = my_start + e;
+                auto m = elem / N;
+                auto n = elem % N;
+                c_local[e] += A[k * M + m] * B[k * N + n];
+              }
+            }
+
+            // Atomic accumulate to global
+            for (unsigned int e = 0; e < my_end - my_start; ++e) {
+              auto elem = my_start + e;
+              auto m = elem / N;
+              auto n = elem % N;
+              ::sycl::atomic_ref<T, ::sycl::memory_order::relaxed, ::sycl::memory_scope::device, ::sycl::access::address_space::global_space> c_ref(C[m * N + n]);
+              c_ref += c_local[e];
+            }
+          });
     });
   }
 
