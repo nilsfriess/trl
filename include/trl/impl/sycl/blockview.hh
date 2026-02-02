@@ -7,16 +7,10 @@
 
 #include "matrixblockview.hh"
 
-inline constexpr std::size_t to_linear_index(std::size_t cols, std::size_t i, std::size_t j) { return i * cols + j; }
-
 namespace trl::sycl {
 // TODO: cols_ should be an unsigned int
 template <class T, std::size_t cols_>
 class BlockView {
-  static constexpr size_t local_size = 128;
-  static constexpr size_t cache_line_size = 64;
-  static constexpr size_t padded_partial_size = ((cols_ * cols_ * sizeof(T) + cache_line_size - 1) / cache_line_size) * cache_line_size / sizeof(T);
-
 public:
   using EntryType = T;
   using MatrixBlockView = MatrixBlockView<T, cols_>;
@@ -26,16 +20,6 @@ public:
       , q(queue)
       , rows_(rows)
   {
-
-    // Query once at startup
-    size_t num_cu = q->get_device().get_info<::sycl::info::device::max_compute_units>();
-
-    size_t num_groups = num_cu * 4;
-    global_size = local_size * num_groups;
-
-    // For CPU
-    n_threads = std::max<std::size_t>(1, q->get_device().template get_info<::sycl::info::device::max_compute_units>() * 8);
-    partialC = ::sycl::malloc_shared<T>(n_threads * padded_partial_size, *q);
   }
 
   // Default copy operations (copying a view is cheap)
@@ -63,74 +47,36 @@ public:
     q->memcpy(data, source.data, rows_ * cols_ * sizeof(T)).wait();
   }
 
-  void dot(BlockView B, MatrixBlockView C)
+  void dot(BlockView Bv, MatrixBlockView Cv)
   {
-    const auto n = rows();
-    constexpr auto m = cols_;
-    constexpr auto mm = cols_ * cols_;
+    // Notation from https://journals.sagepub.com/doi/epub/10.1177/1094342020965661
+    const auto K = rows();
+    constexpr auto M = cols_;
+    constexpr auto N = cols_;
 
-    C.set_zero();
-#if 0
-    q->submit([&](auto& cgh) {
-      auto* a = data;
-      auto* b = B.data;
-      auto* c = C.data;
+    Cv.set_zero();
+    q->submit([&](::sycl::handler& cgh) {
+      auto* A = this->data;
+      auto* B = Bv.data;
+      auto* C = Cv.data;
 
-      cgh.parallel_for(::sycl::nd_range<1>{global_size, local_size}, [=](::sycl::nd_item<1> item) {
-        const auto tid = item.get_global_id(0);
-        const auto stride = item.get_global_range(0);
+      const auto stride = 256 * q->get_device().get_info<::sycl::info::device::max_compute_units>();
 
-        T private_c[cols_][cols_] = {};
+      cgh.parallel_for(::sycl::range<1>(stride), [=](auto id) {
+        T c_local[M][N] = {};
 
-        // Compute local contributions
-        for (std::size_t k = tid; k < n; k += stride) {
-          for (std::size_t i = 0; i < m; ++i)
-            for (std::size_t j = 0; j < m; ++j) private_c[i][j] += a[to_linear_index(m, k, i)] * b[to_linear_index(m, k, j)];
+        for (std::size_t k = id; k < K; k += stride) {
+          for (unsigned int m = 0; m < M; ++m)
+            for (unsigned int n = 0; n < N; ++n) c_local[m][n] += A[k * cols_ + m] * B[k * cols_ + n];
         }
 
-        for (std::size_t i = 0; i < m; ++i) {
-          for (std::size_t j = 0; j < m; ++j) {
-            ::sycl::atomic_ref<T, ::sycl::memory_order::relaxed, ::sycl::memory_scope::device> atomic_c(c[to_linear_index(m, i, j)]);
-            atomic_c += private_c[i][j];
+        for (unsigned int m = 0; m < M; ++m)
+          for (unsigned int n = 0; n < N; ++n) {
+            ::sycl::atomic_ref<T, ::sycl::memory_order::relaxed, ::sycl::memory_scope::device, ::sycl::access::address_space::global_space> c_ref(C[m * cols_ + n]);
+            c_ref += c_local[m][n];
           }
-        }
       });
     });
-#else
-    // Parallel computation of partial results
-    q->submit([&, this](auto& cgh) {
-      auto* a = data;
-      auto* b = B.data;
-      auto* c = C.data;
-
-      const std::size_t num_work_items = 512 * q->get_device().get_info<::sycl::info::device::max_compute_units>();
-      cgh.parallel_for(::sycl::range<1>(num_work_items), [=](::sycl::id<1> idx) {
-        auto tid = idx[0];
-        auto stride = num_work_items;
-
-        T c_acc[mm] = {0.};
-
-        for (std::size_t k = tid / cols_; k < n; k += stride / cols_) {
-          T a_col[m];
-          // T b_row[m];
-
-          for (unsigned int i = 0; i < m; ++i) a_col[i] = a[k * m + i];
-          // for (unsigned int i = 0; i < m; ++i) b_row[i] = b[k * m + i];
-
-          auto j = tid % m;
-          for (unsigned int i = 0; i < m; ++i)
-            // for (unsigned int j = 0; j < m; ++j)
-            c_acc[i * m + j] += a_col[i] * b[k * m + j];
-        }
-
-        for (unsigned int i = 0; i < mm; ++i) {
-          auto atomic_c = ::sycl::atomic_ref<T, ::sycl::memory_order::relaxed, ::sycl::memory_scope::device, ::sycl::access::address_space::global_space>(c[i]);
-          atomic_c.fetch_add(c_acc[i]);
-          // c[i] = c_acc[i];
-        }
-      });
-    });
-#endif
   }
 
   void mult(MatrixBlockView B, BlockView C)
@@ -277,10 +223,5 @@ public:
 private:
   ::sycl::queue* q;
   const std::size_t rows_;
-
-  T* partialC; // for the dot product
-
-  std::size_t global_size{}; // for dot product (GPU)
-  std::size_t n_threads{};   // for dot product (CPU)
 };
 } // namespace trl::sycl

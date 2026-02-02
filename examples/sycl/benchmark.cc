@@ -2,6 +2,7 @@
 
 #include <chrono>
 #include <iostream>
+#include <random>
 #include <ratio>
 #include <sycl/sycl.hpp>
 
@@ -24,8 +25,8 @@ std::pair<T, std::chrono::duration<double>> run(sycl::queue& queue, std::size_t 
   auto v = V.block_view(0);
   auto r = R.block_view(0, 0);
 
-  std::mt19937 rng(42);
-  std::normal_distribution<double> dist;
+  std::minstd_rand0 rng(42);
+  std::uniform_real_distribution<double> dist(-1, 1);
   std::generate_n(v.data, v.rows() * v.cols(), [&]() { return dist(rng); });
   std::generate_n(u.data, u.rows() * u.cols(), [&]() { return dist(rng); });
 
@@ -36,7 +37,6 @@ std::pair<T, std::chrono::duration<double>> run(sycl::queue& queue, std::size_t 
   for (int i = 0; i < run_params.n_benchmark; ++i) u.dot(v, r);
   queue.wait();
   auto end = std::chrono::steady_clock::now();
-
   return {r.data[0], (end - start) / run_params.n_benchmark};
 }
 
@@ -51,31 +51,25 @@ void measure(sycl::queue& queue, std::size_t n, const RunParams& params)
   std::cout << "Measured performance: " << flops(n, bs) / time.count() << " FLOPs/s\n";
 }
 
+template <class Scalar>
+void test(sycl::queue& queue, std::size_t n, const RunParams& params)
+{
+  if constexpr (std::is_same_v<Scalar, double>) std::cout << "===== Running double tests =====\n";
+  else std::cout << "===== Running float tests =====\n";
+
+  measure<Scalar, 1>(queue, n, params);
+  measure<Scalar, 2>(queue, n, params);
+  measure<Scalar, 4>(queue, n, params);
+  measure<Scalar, 8>(queue, n, params);
+}
+
 int main()
 {
   sycl::queue queue{sycl::property::queue::in_order{}};
 
-  std::size_t n = 1024 * 1024;
-
+  std::size_t n = 1 << 20;
   RunParams params{.n_warmup = 10, .n_benchmark = 100};
-  {
-    std::cout << "===== Running double tests =====\n";
-    using Scalar = double;
-    measure<Scalar, 1>(queue, n, params);
-    measure<Scalar, 2>(queue, n, params);
-    measure<Scalar, 4>(queue, n, params);
-    measure<Scalar, 8>(queue, n, params);
-    measure<Scalar, 16>(queue, n, params);
-  }
 
-  {
-    std::cout << "===== Running float tests =====\n";
-    using Scalar = float;
-    measure<Scalar, 1>(queue, n, params);
-    measure<Scalar, 2>(queue, n, params);
-    measure<Scalar, 4>(queue, n, params);
-    measure<Scalar, 8>(queue, n, params);
-    measure<Scalar, 16>(queue, n, params);
-  }
-  // measure<Scalar, 16>(queue, n, params);
+  test<double>(queue, n, params);
+  test<float>(queue, n, params);
 }
