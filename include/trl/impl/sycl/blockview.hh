@@ -79,9 +79,13 @@ public:
       const auto workers_per_tile = num_wg_per_tile * wg_size;
       const auto total_workers = num_tiles * workers_per_tile;
 
+      // Local memory for workgroup-level reduction (one tile's worth per workgroup)
+      ::sycl::local_accessor<T, 1> local_c(TM * TN, cgh);
+
       cgh.parallel_for(
           ::sycl::nd_range<1>(total_workers, wg_size), [=](::sycl::nd_item<1> item) {
             auto global_id = item.get_global_linear_id();
+            auto local_id = item.get_local_linear_id();
             auto tile_idx = global_id % num_tiles;
             auto worker_id = global_id / num_tiles;
 
@@ -175,15 +179,33 @@ public:
               }
             }
 
-            // Sub-group reduction: reduce within sub-group first, then only leader does atomic
-            auto sg = item.get_sub_group();
+            // Two-level reduction (paper's approach):
+            // 1. Local atomic reduction within workgroup (shared memory)
+            // 2. Global atomic from one thread per workgroup
+
+            // Initialize local memory (first TM*TN threads do this)
+            if (local_id < TM * TN) {
+              local_c[local_id] = T(0);
+            }
+            ::sycl::group_barrier(item.get_group());
+
+            // All threads atomically add to local memory
             for (unsigned int tm = 0; tm < TM; ++tm) {
               for (unsigned int tn = 0; tn < TN; ++tn) {
-                T sum = ::sycl::reduce_over_group(sg, c_local[tm][tn], ::sycl::plus<T>());
-                if (sg.get_local_linear_id() == 0) {
+                ::sycl::atomic_ref<T, ::sycl::memory_order::relaxed, ::sycl::memory_scope::work_group, ::sycl::access::address_space::local_space> local_ref(
+                    local_c[tm * TN + tn]);
+                local_ref += c_local[tm][tn];
+              }
+            }
+            ::sycl::group_barrier(item.get_group());
+
+            // Only first thread does global atomic
+            if (local_id == 0) {
+              for (unsigned int tm = 0; tm < TM; ++tm) {
+                for (unsigned int tn = 0; tn < TN; ++tn) {
                   ::sycl::atomic_ref<T, ::sycl::memory_order::relaxed, ::sycl::memory_scope::device, ::sycl::access::address_space::global_space> c_ref(
                       C[m_indices[tm] * N + n_indices[tn]]);
-                  c_ref += sum;
+                  c_ref += local_c[tm * TN + tn];
                 }
               }
             }
