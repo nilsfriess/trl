@@ -8,27 +8,21 @@
 #include "matrixblockview.hh"
 
 namespace trl::sycl {
-// TODO: cols_ should be an unsigned int
-template <class T, std::size_t cols_>
+template <class T, unsigned int cols_>
 class BlockView {
 public:
   using EntryType = T;
   using MatrixBlockView = MatrixBlockView<T, cols_>;
 
-  BlockView(::sycl::queue* queue, T* data, std::size_t rows)
-      : data(data)
-      , q(queue)
-      , rows_(rows)
-  {
-  }
+  BlockView(::sycl::queue *queue, T *data, std::size_t rows) : data(data), q(queue), rows_(rows) {}
 
   // Default copy operations (copying a view is cheap)
-  BlockView(const BlockView&) = default;
-  BlockView& operator=(const BlockView&) = default;
+  BlockView(const BlockView &) = default;
+  BlockView &operator=(const BlockView &) = default;
 
   // Default move operations
-  BlockView(BlockView&&) = default;
-  BlockView& operator=(BlockView&&) = default;
+  BlockView(BlockView &&) = default;
+  BlockView &operator=(BlockView &&) = default;
 
   // Default destructor (view doesn't own data)
   ~BlockView() = default;
@@ -41,13 +35,13 @@ public:
    *  Copies the data from source into this view. Both views must have
    *  the same dimensions.
    */
-  void copy_from(const BlockView& source)
+  void copy_from(const BlockView &source)
   {
     assert(rows_ == source.rows_);
     q->memcpy(data, source.data, rows_ * cols_ * sizeof(T)).wait();
   }
 
-  template <int worker_mult = 64>
+  template <int stride = 64>
   void dot(BlockView Bv, MatrixBlockView Cv)
   {
     // C = A^T * B where A is K×M, B is K×N, C is M×N
@@ -57,159 +51,68 @@ public:
 
     Cv.set_zero();
 
-    // Choose tile size to balance register pressure vs parallelism:
-    // - For M*N <= 16: use full M×N (1 tile)
-    // - For M*N = 64 (blocksize 8): use 2×2 tiles → 16 tiles, 4 registers per tile
-    // - For M*N = 256 (blocksize 16): use 4×4 tiles → 16 tiles, 16 registers per tile
-    constexpr unsigned int TM = (M * N <= 16) ? M : ((M * N <= 64) ? 2 : 4);
-    constexpr unsigned int TN = (M * N <= 16) ? N : ((M * N <= 64) ? 2 : 4);
-    constexpr unsigned int num_tiles_m = (M + TM - 1) / TM;
-    constexpr unsigned int num_tiles_n = (N + TN - 1) / TN;
-    constexpr unsigned int num_tiles = num_tiles_m * num_tiles_n;
+    // Choose tile size adaptively, max tile size is always 4x4. This means:
+    // - For blocksizes 1, 2, 4: just use 1 tile of size 1x1, 2x2, or 4x4 respectively
+    // - For blocksize  8:       use 4 tiles, each of size 4x4
+    // - For blocksize 16:       use 16 tiles, each of size 4x4
+    constexpr unsigned int max_tilesize = 4;
+    constexpr auto TM = std::min(max_tilesize, cols_);
+    constexpr auto TN = TM; // only square tiles for now
+    constexpr auto num_tiles_m = (M + TM - 1) / TM;
+    constexpr auto num_tiles_n = (N + TN - 1) / TN;
+    constexpr auto num_tiles = num_tiles_m * num_tiles_n;
 
-    q->submit([&](::sycl::handler& cgh) {
-      auto* A = this->data;
-      auto* B = Bv.data;
-      auto* C = Cv.data;
+    static_assert(stride % num_tiles == 0, "Stride must be divisible by number of tiles");
 
-      const auto num_cu = q->get_device().get_info<::sycl::info::device::max_compute_units>();
-      // worker_mult controls parallelism: higher = more workers, less work per thread
-      constexpr std::size_t wg_size = 256;
-      const auto num_wg_per_tile = std::max<std::size_t>(1, worker_mult * num_cu / wg_size);
-      const auto workers_per_tile = num_wg_per_tile * wg_size;
-      const auto total_workers = num_tiles * workers_per_tile;
+    q->submit([&](::sycl::handler &cgh) {
+      auto *A = this->data;
+      auto *B = Bv.data;
+      auto *C = Cv.data;
 
-      // Local memory for workgroup-level reduction (one tile's worth per workgroup)
-      ::sycl::local_accessor<T, 1> local_c(TM * TN, cgh);
+      ::sycl::local_accessor<T, 2> local_C({M, N}, cgh);
 
-      cgh.parallel_for(
-          ::sycl::nd_range<1>(total_workers, wg_size), [=](::sycl::nd_item<1> item) {
-            auto global_id = item.get_global_linear_id();
-            auto local_id = item.get_local_linear_id();
-            auto tile_idx = global_id % num_tiles;
-            auto worker_id = global_id / num_tiles;
+      cgh.parallel_for(::sycl::nd_range<1>(stride, 32), [=](::sycl::nd_item<1> item) {
+        std::size_t tid = item.get_global_linear_id();
+        auto midx = (tid / num_tiles_n) % num_tiles_m;
+        auto nidx = tid % num_tiles_n;
 
-            // Transposed tile mapping: instead of thread ti handling columns [ti*TM, ti*TM+TM),
-            // thread ti handles columns ti, ti+num_tiles_m, ti+2*num_tiles_m, ...
-            // This makes adjacent threads access adjacent memory locations (coalesced).
-            auto tile_m = tile_idx / num_tiles_n;
-            auto tile_n = tile_idx % num_tiles_n;
+        T C_private[TM][TN] = {0.};
 
-            // With transposed mapping, compute the M indices this tile handles
-            // tile_m selects which "group" of interleaved columns
-            // Elements: tile_m, tile_m + num_tiles_m, tile_m + 2*num_tiles_m, ...
-            unsigned int m_indices[TM];
-            unsigned int n_indices[TN];
-            if constexpr (TM < M) {
-              // Transposed: interleaved pattern for coalesced access
-              for (unsigned int tm = 0; tm < TM; ++tm) {
-                m_indices[tm] = tile_m + tm * num_tiles_m;
-              }
-              for (unsigned int tn = 0; tn < TN; ++tn) {
-                n_indices[tn] = tile_n + tn * num_tiles_n;
-              }
-            } else {
-              // Small blocksize: contiguous (no transpose needed)
-              for (unsigned int tm = 0; tm < TM; ++tm) {
-                m_indices[tm] = tm;
-              }
-              for (unsigned int tn = 0; tn < TN; ++tn) {
-                n_indices[tn] = tn;
-              }
+        if (item.get_local_id()[0] == 0) {
+          for (unsigned int m = 0; m < M; ++m)
+            for (unsigned int n = 0; n < N; ++n)
+              local_C[m][n] = 0;
+        }
+        item.barrier(::sycl::access::fence_space::local_space);
+
+        for (std::size_t k = tid / num_tiles; k < K; k += stride / num_tiles)
+          for (unsigned int tm = 0; tm < TM; ++tm)
+            for (unsigned int tn = 0; tn < TN; ++tn) {
+              auto m = midx * TM + tm;
+              auto n = nidx * TN + tn;
+              C_private[tm][tn] += A[k * cols_ + m] * B[k * cols_ + n];
             }
 
-            T c_local[TM][TN] = {};
+        // Accumulate to shared memory
+        for (unsigned int tm = 0; tm < TM; ++tm)
+          for (unsigned int tn = 0; tn < TN; ++tn) {
+            auto m = midx * TM + tm;
+            auto n = nidx * TN + tn;
 
-            // Use different strategies based on tile size (compile-time known)
-            if constexpr (TM >= 4) {
-              // Leap-frogging (double buffering) for larger tiles: load next iteration's
-              // data while computing on current data to hide memory latency.
-              T a_curr[TM], a_next[TM];
-              T b_curr[TN], b_next[TN];
+            ::sycl::atomic_ref<T, ::sycl::memory_order::relaxed, ::sycl::memory_scope::device, ::sycl::access::address_space::local_space> C_ref(local_C[m][n]);
+            C_ref.fetch_add(C_private[tm][tn]);
+          }
+        item.barrier(::sycl::access::fence_space::local_space);
 
-              // Prefetch first iteration
-              std::size_t k = worker_id;
-              if (k < K) {
-                for (unsigned int tm = 0; tm < TM; ++tm) {
-                  a_next[tm] = A[k * M + m_indices[tm]];
-                }
-                for (unsigned int tn = 0; tn < TN; ++tn) {
-                  b_next[tn] = B[k * N + n_indices[tn]];
-                }
-              }
-
-              // Main loop with prefetching
-              for (; k < K; k += workers_per_tile) {
-                // Current = what we prefetched
-                for (unsigned int tm = 0; tm < TM; ++tm) a_curr[tm] = a_next[tm];
-                for (unsigned int tn = 0; tn < TN; ++tn) b_curr[tn] = b_next[tn];
-
-                // Prefetch next iteration (loads issued early, hide behind compute)
-                std::size_t k_next = k + workers_per_tile;
-                if (k_next < K) {
-                  for (unsigned int tm = 0; tm < TM; ++tm) {
-                    a_next[tm] = A[k_next * M + m_indices[tm]];
-                  }
-                  for (unsigned int tn = 0; tn < TN; ++tn) {
-                    b_next[tn] = B[k_next * N + n_indices[tn]];
-                  }
-                }
-
-                // Compute outer product (happens while loads are in flight)
-                for (unsigned int tn = 0; tn < TN; ++tn) {
-                  for (unsigned int tm = 0; tm < TM; ++tm) {
-                    c_local[tm][tn] += a_curr[tm] * b_curr[tn];
-                  }
-                }
-              }
-            } else {
-              // Simple path for small tiles (TM < 4)
-              for (std::size_t k = worker_id; k < K; k += workers_per_tile) {
-                T a_reg[TM];
-                for (unsigned int tm = 0; tm < TM; ++tm) {
-                  a_reg[tm] = A[k * M + m_indices[tm]];
-                }
-
-                for (unsigned int tn = 0; tn < TN; ++tn) {
-                  T b_val = B[k * N + n_indices[tn]];
-                  for (unsigned int tm = 0; tm < TM; ++tm) {
-                    c_local[tm][tn] += a_reg[tm] * b_val;
-                  }
-                }
-              }
+        // Accumulate to global C. Since we already reduced in within the subgroup, only the first work item has to do this
+        if (item.get_local_id()[0] == 0) {
+          for (unsigned int m = 0; m < M; ++m)
+            for (unsigned int n = 0; n < N; ++n) {
+              ::sycl::atomic_ref<T, ::sycl::memory_order::relaxed, ::sycl::memory_scope::device, ::sycl::access::address_space::global_space> C_ref(C[m * cols_ + n]);
+              C_ref.fetch_add(local_C[m][n]);
             }
-
-            // Two-level reduction (paper's approach):
-            // 1. Local atomic reduction within workgroup (shared memory)
-            // 2. Global atomic from one thread per workgroup
-
-            // Initialize local memory (first TM*TN threads do this)
-            if (local_id < TM * TN) {
-              local_c[local_id] = T(0);
-            }
-            ::sycl::group_barrier(item.get_group());
-
-            // All threads atomically add to local memory
-            for (unsigned int tm = 0; tm < TM; ++tm) {
-              for (unsigned int tn = 0; tn < TN; ++tn) {
-                ::sycl::atomic_ref<T, ::sycl::memory_order::relaxed, ::sycl::memory_scope::work_group, ::sycl::access::address_space::local_space> local_ref(
-                    local_c[tm * TN + tn]);
-                local_ref += c_local[tm][tn];
-              }
-            }
-            ::sycl::group_barrier(item.get_group());
-
-            // Only first thread does global atomic
-            if (local_id == 0) {
-              for (unsigned int tm = 0; tm < TM; ++tm) {
-                for (unsigned int tn = 0; tn < TN; ++tn) {
-                  ::sycl::atomic_ref<T, ::sycl::memory_order::relaxed, ::sycl::memory_scope::device, ::sycl::access::address_space::global_space> c_ref(
-                      C[m_indices[tm] * N + n_indices[tn]]);
-                  c_ref += local_c[tm * TN + tn];
-                }
-              }
-            }
-          });
+        }
+      });
     });
   }
 
@@ -217,25 +120,28 @@ public:
   {
     const auto n = rows();
 
-    q->submit([&](auto& cgh) {
-      auto* a = data;
-      auto* b = B.data;
-      auto* c = C.data;
+    q->submit([&](auto &cgh) {
+      auto *a = data;
+      auto *b = B.data;
+      auto *c = C.data;
 
       cgh.parallel_for(::sycl::range{n}, [=](::sycl::id<1> id) {
         auto tid = id[0];
 
         T a_private[cols_];
-        for (std::size_t i = 0; i < cols_; ++i) a_private[i] = a[tid * cols_ + i];
+        for (std::size_t i = 0; i < cols_; ++i)
+          a_private[i] = a[tid * cols_ + i];
 
         T c_private[cols_];
         for (std::size_t i = 0; i < cols_; ++i) {
           T sum{0};
-          for (std::size_t j = 0; j < cols_; ++j) sum += a_private[j] * b[j * cols_ + i];
+          for (std::size_t j = 0; j < cols_; ++j)
+            sum += a_private[j] * b[j * cols_ + i];
           c_private[i] = sum;
         }
 
-        for (std::size_t i = 0; i < cols_; ++i) c[tid * cols_ + i] = c_private[i];
+        for (std::size_t i = 0; i < cols_; ++i)
+          c[tid * cols_ + i] = c_private[i];
       });
     });
   }
@@ -244,25 +150,28 @@ public:
   {
     const auto n = rows();
 
-    q->submit([&](auto& cgh) {
-      auto* a = data;
-      auto* b = B.data;
-      auto* c = C.data;
+    q->submit([&](auto &cgh) {
+      auto *a = data;
+      auto *b = B.data;
+      auto *c = C.data;
 
       cgh.parallel_for(::sycl::range{n}, [=](::sycl::id<1> id) {
         auto tid = id[0];
 
         T a_private[cols_];
-        for (std::size_t i = 0; i < cols_; ++i) a_private[i] = a[tid * cols_ + i];
+        for (std::size_t i = 0; i < cols_; ++i)
+          a_private[i] = a[tid * cols_ + i];
 
         T c_private[cols_];
         for (std::size_t i = 0; i < cols_; ++i) {
           T sum{0};
-          for (std::size_t j = 0; j < cols_; ++j) sum += a_private[j] * b[j * cols_ + i];
+          for (std::size_t j = 0; j < cols_; ++j)
+            sum += a_private[j] * b[j * cols_ + i];
           c_private[i] = sum;
         }
 
-        for (std::size_t i = 0; i < cols_; ++i) c[tid * cols_ + i] += c_private[i];
+        for (std::size_t i = 0; i < cols_; ++i)
+          c[tid * cols_ + i] += c_private[i];
       });
     });
   }
@@ -271,40 +180,44 @@ public:
   {
     const auto n = rows();
 
-    q->submit([&](auto& cgh) {
-      auto* a = data;
-      auto* b = B.data;
-      auto* c = C.data;
+    q->submit([&](auto &cgh) {
+      auto *a = data;
+      auto *b = B.data;
+      auto *c = C.data;
 
       cgh.parallel_for(::sycl::range{n}, [=](::sycl::id<1> id) {
         auto tid = id[0];
 
         T a_private[cols_];
-        for (std::size_t i = 0; i < cols_; ++i) a_private[i] = a[tid * cols_ + i];
+        for (std::size_t i = 0; i < cols_; ++i)
+          a_private[i] = a[tid * cols_ + i];
 
         T c_private[cols_];
         for (std::size_t i = 0; i < cols_; ++i) {
           T sum{0};
-          for (std::size_t j = 0; j < cols_; ++j) sum += a_private[j] * b[i * cols_ + j];
+          for (std::size_t j = 0; j < cols_; ++j)
+            sum += a_private[j] * b[i * cols_ + j];
           c_private[i] = sum;
         }
 
-        for (std::size_t i = 0; i < cols_; ++i) c[tid * cols_ + i] = c_private[i];
+        for (std::size_t i = 0; i < cols_; ++i)
+          c[tid * cols_ + i] = c_private[i];
       });
     });
   }
 
-  BlockView& operator-=(BlockView B)
+  BlockView &operator-=(BlockView B)
   {
     const auto n = rows();
 
-    q->submit([&](auto& cgh) {
-      auto* a = data;
-      auto* b = B.data;
+    q->submit([&](auto &cgh) {
+      auto *a = data;
+      auto *b = B.data;
 
       cgh.parallel_for(::sycl::range{n}, [=](::sycl::id<1> id) {
         auto tid = id[0];
-        for (std::size_t i = 0; i < cols_; ++i) a[tid * cols_ + i] -= b[tid * cols_ + i];
+        for (std::size_t i = 0; i < cols_; ++i)
+          a[tid * cols_ + i] -= b[tid * cols_ + i];
       });
     });
 
@@ -316,20 +229,22 @@ public:
     const std::size_t K = rows();
     const std::size_t M = cols_;
 
-    q->submit([&](::sycl::handler& cgh) {
-      auto* a = data; // this
-      auto* b = B.data;
-      auto* c = C.data;
+    q->submit([&](::sycl::handler &cgh) {
+      auto *a = data; // this
+      auto *b = B.data;
+      auto *c = C.data;
 
       cgh.parallel_for(::sycl::range<1>{K}, [=](::sycl::id<1> id) {
         const std::size_t k = id[0];
 
         T brow[cols_];
-        for (std::size_t m = 0; m < M; ++m) brow[m] = b[k * M + m];
+        for (std::size_t m = 0; m < M; ++m)
+          brow[m] = b[k * M + m];
 
         for (std::size_t n = 0; n < M; ++n) {
           T sum = T(0);
-          for (std::size_t m = 0; m < M; ++m) sum += brow[m] * c[m * M + n];
+          for (std::size_t m = 0; m < M; ++m)
+            sum += brow[m] * c[m * M + n];
 
           a[k * M + n] -= sum;
         }
@@ -346,16 +261,16 @@ public:
 
   void set_zero() { q->memset(data, 0, rows_ * cols_ * sizeof(T)); }
 
-  T& operator()(std::size_t row, std::size_t col)
+  T &operator()(std::size_t row, std::size_t col)
   {
     assert(false && "not implemented");
     return data[row * cols_ + col];
   }
 
-  T* data;
+  T *data;
 
 private:
-  ::sycl::queue* q;
+  ::sycl::queue *q;
   std::size_t rows_;
 };
 } // namespace trl::sycl
