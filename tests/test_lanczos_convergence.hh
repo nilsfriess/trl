@@ -8,7 +8,7 @@
 #include "helpers.hh"
 
 template <trl::Eigenproblem EVP, class TestHelper>
-bool test_lanczos_convergence(std::shared_ptr<EVP> evp, TestHelper& helper, const std::vector<typename EVP::Scalar>& exact_eigenvalues)
+bool test_lanczos_convergence(std::shared_ptr<EVP> evp, TestHelper& helper, const std::vector<typename EVP::Scalar>& exact_eigenvalues, typename EVP::Scalar tolerance = 1e-8)
 {
   using Scalar = typename EVP::Scalar;
   constexpr auto bs = EVP::blocksize;
@@ -17,7 +17,7 @@ bool test_lanczos_convergence(std::shared_ptr<EVP> evp, TestHelper& helper, cons
   std::cout << "\nTesting Lanczos convergence, type = " << trl::type_str<Scalar>() << ", N = " << N << ", bs = " << bs << ": ";
 
   unsigned int nev = exact_eigenvalues.size();
-  trl::EigensolverParams params{.nev = nev, .ncv = 2 * nev, .max_restarts = 1000};
+  trl::EigensolverParams params{.nev = nev, .ncv = 4 * nev, .max_restarts = 1000, .tolerance = static_cast<double>(tolerance)};
   trl::BlockLanczos lanczos(evp, params);
 
   auto V0 = lanczos.initial_block();

@@ -39,55 +39,23 @@ public:
     V.dot(V, R);
     queue.wait();
 
-    // 2. Do a CPU-side Cholesky on R
-    // We compute G = U^T * U where U is upper triangular (stored in upper part of A)
-    T* A = R.data;
+    // 2. Compute Cholesky factorization of G = U^T * U
+    Eigen::Map<Eigen::Matrix<T, bs, bs, Eigen::RowMajor>> RR(R.data);
+    Eigen::LLT<Eigen::Matrix<T, Eigen::Dynamic, Eigen::Dynamic>> llt(RR);
+    if (llt.info() != Eigen::Success) throw std::runtime_error("Cholesky factorization failed in orthonormalize");
+    RR = llt.matrixL().transpose();
+    auto stored_R = RR.eval();
 
-    for (Index j = 0; j < bs; ++j) {
-      // Diagonal element R[j,j]
-      T sum = A[j * bs + j];
-      for (Index k = 0; k < j; ++k) sum -= A[k * bs + j] * A[k * bs + j];
+    // 3. Compute U^{-1} and store in R temporarily
+    RR = stored_R.inverse().eval();
 
-      if (sum <= 0.0) throw std::runtime_error("Matrix not SPD");
-      A[j * bs + j] = std::sqrt(sum);
-
-      // Elements to the right: R[j, i] for i > j
-      for (Index i = j + 1; i < bs; ++i) {
-        T s = A[j * bs + i];
-        for (Index k = 0; k < j; ++k) s -= A[k * bs + i] * A[k * bs + j];
-        A[j * bs + i] = s / A[j * bs + j];
-      }
-    }
-
-    // Zero the lower triangle
-    for (Index i = 0; i < bs; ++i)
-      for (Index j = 0; j < i; ++j) A[i * bs + j] = 0.0;
-
-    // Save U for later (R should output the Cholesky factor)
-    Eigen::Matrix<T, bs, bs> U_saved;
-    for (Index i = 0; i < bs; ++i)
-      for (Index j = 0; j < bs; ++j) U_saved(i, j) = A[i * bs + j];
-
-    // 3. Compute V = V * U^{-1}
-    // We need U^{-1} for the multiplication: V_new = V_old * U^{-1}
-    // Due to Eigen's column-major and our row-major, the mapping transposes:
-    // Eigen sees A^T. So if A contains U (upper tri), Eigen sees U^T (lower tri).
-    Eigen::Map<Eigen::Matrix<T, bs, bs>> Lt(A);
-    auto Lti = Lt.inverse().eval(); // Computes (U^T)^{-1} = U^{-T}
-    Lt = Lti;                       // A now contains U^{-T} in Eigen's view
-                                    // In our row-major view, A contains (U^{-T})^T = U^{-1}
-
-    // Use temporary to avoid aliasing
     auto Vtemp0 = Vtemp->block_view(0);
     V.mult(R, Vtemp0); // V_temp = V * U^{-1}
     V.copy_from(Vtemp0);
     queue.wait(); // Ensure copy completes
 
     // 4. Restore U in R (the Cholesky factor, not its inverse)
-    // The Lanczos algorithm needs R such that V_old = V_new * R
-    // Since V_old = V_new * U, we need R = U
-    for (Index i = 0; i < bs; ++i)
-      for (Index j = 0; j < bs; ++j) A[i * bs + j] = U_saved(i, j);
+    RR = stored_R;
   }
 
   auto create_multivector(Index rows, Index cols) { return BlockMultivector(queue, rows, cols); }
@@ -107,7 +75,7 @@ public:
     return data;
   }
 
-  std::size_t solve_small_dense(const typename BlockMultivector::BlockMatrix& B, typename BlockMultivector::BlockMatrix::BlockView beta)
+  std::size_t solve_small_dense(const typename BlockMultivector::BlockMatrix& B, typename BlockMultivector::BlockMatrix::BlockView beta, std::size_t nev)
   {
     queue.wait();
 
@@ -188,9 +156,10 @@ public:
 
     // Count converged eigenvalues (residual norm < tolerance)
     const std::size_t n_eigs = eigenvectors->block_cols() * bs;
+    const std::size_t n_check = std::min<std::size_t>(nev, n_eigs);
     std::size_t n_converged = 0;
     std::cout << "  Residual norms: \n";
-    for (std::size_t j = 0; j < n_eigs; ++j) {
+    for (std::size_t j = 0; j < n_check; ++j) {
       T residual_norm = compute_norm(j);
       if (j < 16) std::cout << "    Eigenvalue " << j << ": " << residual_norm << "\n";
       if (residual_norm < tolerance_) n_converged++;

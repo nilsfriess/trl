@@ -53,7 +53,7 @@ bool check_orthogonality(EVP& evp, TestHelper& helper, typename EVP::BlockMultiv
 
     // Check V_i^T * V_i = I
     Vi.dot(Vi, temp_block);
-    helper.sync();  // Wait BEFORE reading data
+    helper.sync();
     auto temp_block_host = helper.to_host_data(temp_block);
 
     for (unsigned int r = 0; r < bs; ++r) {
@@ -68,7 +68,7 @@ bool check_orthogonality(EVP& evp, TestHelper& helper, typename EVP::BlockMultiv
     for (unsigned int j = 0; j < i; ++j) {
       auto Vj = V.block_view(j);
       Vi.dot(Vj, temp_block);
-      helper.sync();  // Wait BEFORE reading data
+      helper.sync();
       temp_block_host = helper.to_host_data(temp_block);
       for (unsigned int k = 0; k < bs * bs; ++k) {
         if (std::abs(temp_block_host[k]) > max_offdiag) {

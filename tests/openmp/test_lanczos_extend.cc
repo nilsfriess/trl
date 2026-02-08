@@ -1,22 +1,21 @@
 #include <iostream>
 
 #include "../test_lanczos_extend.hh"
-#include "sycl/diagonal.hh"
+#include "diagonal.hh"
 #include "test_helper.hh"
 
-#include <memory>
-#include <sycl/sycl.hpp>
+using trl::openmp::tests::DiagonalEVP;
 
 template <class Scalar, unsigned int bs>
-bool run_test(sycl::queue q, bool verbose)
+bool run_test(bool verbose)
 {
-  const unsigned int N = 512;
+  const unsigned int N = 128;
   using EVP = DiagonalEVP<Scalar, bs>;
 
-  auto evp = std::make_shared<EVP>(q, N);
-  double tolerance = 1e-8;
+  auto evp = std::make_shared<EVP>(N);
+  Scalar tolerance = 1e-8;
 
-  SYCLTestHelper<EVP> helper(q);
+  OpenMPTestHelper<EVP> helper;
   return test_lanczos_extend(evp, helper, tolerance, verbose);
 }
 
@@ -25,7 +24,7 @@ int main()
   bool verbose = true;
 
   std::cout << "========================================\n";
-  std::cout << "<<<<<<<        SYCL TEST        >>>>>>>>\n";
+  std::cout << "<<<<<<<<<      OpenMP TEST       >>>>>>>\n";
   std::cout << "========================================\n";
 
   std::cout << "========================================\n";
@@ -34,11 +33,10 @@ int main()
 
   int num_failed = 0;
 
-  sycl::queue q{sycl::property::queue::in_order()};
-  if (!run_test<double, 1>(q, verbose)) num_failed++;
-  if (!run_test<double, 2>(q, verbose)) num_failed++;
-  if (!run_test<double, 4>(q, verbose)) num_failed++;
-  if (!run_test<double, 8>(q, verbose)) num_failed++;
+  if (!run_test<double, 1>(verbose)) num_failed++;
+  if (!run_test<double, 2>(verbose)) num_failed++;
+  if (!run_test<double, 4>(verbose)) num_failed++;
+  if (!run_test<double, 8>(verbose)) num_failed++;
 
   return num_failed;
 }

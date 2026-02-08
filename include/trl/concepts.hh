@@ -200,7 +200,7 @@ concept Eigenproblem =
        *
        *  @param T The block tridiagonal matrix (input)
        */
-      { evp.solve_small_dense(B_mat, B) } -> std::same_as<std::size_t>;
+      { evp.solve_small_dense(B_mat, B, std::size_t{}) } -> std::same_as<std::size_t>;
 
       { evp.get_current_eigenvalues() };
       { evp.get_current_eigenvectors() } -> std::same_as<const typename EVP::BlockMultivector::BlockMatrix&>;

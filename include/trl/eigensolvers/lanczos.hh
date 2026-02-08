@@ -40,6 +40,10 @@ public:
     }
 
     if (nev >= ncv) throw std::invalid_argument("nev must be strictly smaller than ncv");
+
+    if constexpr (requires { evp->set_tolerance(Scalar(0)); }) {
+      evp->set_tolerance(static_cast<Scalar>(params.tolerance));
+    }
   }
 
   /** @brief Solves the eigenvalue problem using thick-restart Lanczos
@@ -56,7 +60,7 @@ public:
     auto beta = B.block_view(0, 0);
 
     while (result.iterations < max_restarts) {
-      std::cout << "Restart iteration " << result.iterations << " (k=" << k << ", nev/bs=" << nev / blocksize << ", ncv/bs=" << ncv / blocksize << ")\n";
+      // std::cout << "Restart iteration " << result.iterations << " (k=" << k << ", nev/bs=" << nev / blocksize << ", ncv/bs=" << ncv / blocksize << ")\n";
       result.iterations++;
 
       // Extend the basis to the maximum allowed size. In the first iteration, k = 0 so here
@@ -65,13 +69,13 @@ public:
       result.n_op_apply += extend(k, ncv / blocksize);
 
       // Solve the small projected system
-      auto converged = evp->solve_small_dense(T, beta);
+      auto converged = evp->solve_small_dense(T, beta, nev);
       if (converged >= nev) {
         result.converged = true;
         return result;
       }
       else {
-        std::cout << "  Eigenvalues converged: " << converged << "\n";
+        // std::cout << "  Eigenvalues converged: " << converged << "\n";
       }
 
       // We did not converge yet, so now we must prepare for restart. We begin by computing

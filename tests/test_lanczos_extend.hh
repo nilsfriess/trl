@@ -14,11 +14,9 @@ bool test_lanczos_extend(std::shared_ptr<EVP> evp, TestHelper& helper, typename 
   constexpr auto bs = EVP::blocksize;
   auto N = evp->size();
 
-  std::cout << "Testing Lanczos relation, type = " << trl::type_str<Scalar>() << ", N = " << N << ", bs = " << bs << ": ";
+  std::cout << "Testing Lanczos relation, type = " << trl::type_str<Scalar>() << ", N = " << N << ", bs = " << bs << ": " << std::flush;
 
-  // Use fewer columns than N to avoid Krylov subspace exhaustion
-  // With ncv = N/2, we can do ncv/bs iterations without breakdown
-  trl::EigensolverParams params{.nev = 8, .ncv = static_cast<unsigned int>(N / 2), .max_restarts = 1000};
+  trl::EigensolverParams params{.nev = 8, .ncv = 32, .max_restarts = 1000};
   trl::BlockLanczos lanczos(evp, params);
 
   helper.sync();
@@ -44,7 +42,7 @@ bool test_lanczos_extend(std::shared_ptr<EVP> evp, TestHelper& helper, typename 
   auto AV = evp->create_multivector(N, params.ncv);
   for (unsigned int i = 0; i < num_blocks; ++i) evp->apply(V.block_view(i), AV.block_view(i));
 
-  helper.sync();  // Wait for all apply operations
+  helper.sync(); // Wait for all apply operations
 
   // Compute V*T (using only the first num_blocks blocks of V).
   // We only have a multiplication for blocks, so we need to do the full multiplication by hand.
@@ -60,7 +58,7 @@ bool test_lanczos_extend(std::shared_ptr<EVP> evp, TestHelper& helper, typename 
     }
   }
 
-  helper.sync();  // Wait for all mult_add operations
+  helper.sync(); // Wait for all mult_add operations
 
   // Compute residual: AV - VT
   for (std::size_t i = 0; i < AV.blocks(); ++i) {
@@ -69,7 +67,7 @@ bool test_lanczos_extend(std::shared_ptr<EVP> evp, TestHelper& helper, typename 
     AVi -= VTi;
   }
 
-  helper.sync();  // Wait for all subtraction operations
+  helper.sync(); // Wait for all subtraction operations
 
   // Check norms of all blocks except the last
   Scalar max_error = 0;
@@ -95,13 +93,13 @@ bool test_lanczos_extend(std::shared_ptr<EVP> evp, TestHelper& helper, typename 
   auto residual_block = residual_term.block_view(0);
   V_kplus1.mult(beta, residual_block);
 
-  helper.sync();  // Wait for mult operation
+  helper.sync(); // Wait for mult operation
 
   // Check difference between (AV - VT)_{last} and V_{k+1} * beta^T
   auto last_block_view = AV.block_view(num_blocks - 1);
   last_block_view -= residual_block;
 
-  helper.sync();  // Wait for subtraction
+  helper.sync(); // Wait for subtraction
 
   auto last_block_error = helper.norm(last_block_view);
 

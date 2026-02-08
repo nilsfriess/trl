@@ -9,8 +9,7 @@
 #include <cstdlib>
 #include <iomanip>
 #include <iostream>
-
-#include <sycl/sycl.hpp>
+#include <random>
 
 #include <trl/eigensolvers/lanczos.hh>
 #include <trl/eigensolvers/params.hh>
@@ -36,7 +35,7 @@ int main(int argc, char* argv[])
   }
 
   std::string matrix_file = argv[1];
-  unsigned int nev = (argc > 2) ? std::atoi(argv[2]) : 10;
+  unsigned int nev = (argc > 2) ? std::atoi(argv[2]) : 16;
   unsigned int ncv = (argc > 3) ? std::atoi(argv[3]) : 4 * nev;
 
   std::cout << "========================================\n";
@@ -46,21 +45,14 @@ int main(int argc, char* argv[])
   std::cout << "nev = " << nev << ", ncv = " << ncv << ", blocksize = " << BLOCKSIZE << "\n";
 
   try {
-    sycl::queue queue{sycl::property::queue::in_order{}};
-    std::cout << "SYCL device: " << queue.get_device().get_info<sycl::info::device::name>() << "\n\n";
-
     // Create the eigenvalue problem from the matrix file
     using EVP = CSREVP<double, BLOCKSIZE>;
-    auto evp = std::make_shared<EVP>(queue, matrix_file);
+    auto evp = std::make_shared<EVP>(matrix_file);
 
     std::cout << "Matrix size: " << evp->size() << " x " << evp->size() << "\n\n";
 
     // Set up the Lanczos solver
-    trl::EigensolverParams params{
-        .nev = nev,
-        .ncv = ncv,
-        .max_restarts = 1000,
-    };
+    trl::EigensolverParams params{.nev = nev, .ncv = ncv, .max_restarts = 1000, .tolerance = 1e-8};
 
     // Create the Spectra solver object to compute the reference solution
     Eigen::SparseMatrix<double> A;
@@ -68,24 +60,35 @@ int main(int argc, char* argv[])
     using Op = Spectra::SparseSymMatProd<double>;
     Op op(A);
     Spectra::SymEigsSolver<Op> eigs(op, params.nev, params.ncv);
-    eigs.init();
-    {
+    constexpr std::size_t num_runs = 1;
+
+    Eigen::VectorXd evalues;
+    std::chrono::duration<double, std::milli> spectra_total{0};
+    for (std::size_t i = 0; i < num_runs; ++i) {
+      Spectra::SymEigsSolver<Op> eigs(op, params.nev, params.ncv);
+      eigs.init();
+
       std::cout << "Running Spectra...\n";
       auto start = std::chrono::steady_clock::now();
       eigs.compute();
       auto end = std::chrono::steady_clock::now();
-      std::cout << "Took: " << std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count() << "ms\n";
+      auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
+      spectra_total += elapsed;
+      std::cout << "Run " << i << ", took: " << elapsed.count() << "ms\n";
+
+      if (i + 1 == num_runs && eigs.info() == Spectra::CompInfo::Successful) evalues = eigs.eigenvalues();
     }
 
-    // Retrieve results
-    Eigen::VectorXd evalues;
-    if (eigs.info() == Spectra::CompInfo::Successful) evalues = eigs.eigenvalues();
+    const double spectra_avg = spectra_total.count() / static_cast<double>(num_runs);
+    std::cout << "Spectra average over " << num_runs << " runs: " << spectra_avg << "ms\n";
 
     std::cout << "Eigenvalues found using spectra:\n" << std::fixed << std::setprecision(10) << evalues << std::endl;
 
-    trl::BlockLanczos lanczos(evp, params);
+    std::chrono::duration<double, std::milli> lanczos_total{0};
+    trl::EigensolverResult last_result{};
+    for (std::size_t i = 0; i < num_runs; ++i) {
+      trl::BlockLanczos lanczos(evp, params);
 
-    for (std::size_t i = 0; i < 1; ++i) {
       // Initialize with random starting block
       auto V0 = lanczos.initial_block();
       std::mt19937 rng(42);
@@ -95,13 +98,17 @@ int main(int argc, char* argv[])
       // Solve
       std::cout << "Running Block Lanczos...\n";
       auto start = std::chrono::steady_clock::now();
-      auto result = lanczos.solve();
+      last_result = lanczos.solve();
       auto end = std::chrono::steady_clock::now();
-      queue.wait();
-      std::cout << "Run " << i << ", took: " << std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count() << "ms\n";
+      auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
+      lanczos_total += elapsed;
+      std::cout << "Run " << i << ", took: " << elapsed.count() << "ms\n";
     }
 
-    auto result = lanczos.solve();
+    const double lanczos_avg = lanczos_total.count() / static_cast<double>(num_runs);
+    std::cout << "Block Lanczos average over " << num_runs << " runs: " << lanczos_avg << "ms\n";
+
+    auto result = last_result;
     if (result.converged) {
       std::cout << "\nConverged in " << result.iterations << " iterations";
       std::cout << " (" << result.n_op_apply << " matrix-vector products)\n\n";
@@ -119,7 +126,7 @@ int main(int argc, char* argv[])
 
     // Compare with spectra results
     std::cout << "Difference between ours and Spectra:\n";
-    for (std::size_t i = 0; i < params.nev; ++i) std::cout << "  Eigenvalue " << i << ": " << std::abs(eigenvalues[i] - evalues[i]) << "\n";
+    for (std::size_t i = 0; i < params.nev; ++i) std::cout << "  Eigenvalue " << i << ": " << std::abs(eigenvalues[i] - evalues[i]) / std::abs(evalues[i]) << "\n";
 
     std::cout << "\n========================================\n";
   }

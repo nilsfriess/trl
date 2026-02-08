@@ -1,16 +1,15 @@
 #pragma once
 
 #include <algorithm>
+#include <cstdlib>
 #include <fstream>
-#include <limits>
 #include <sstream>
 #include <stdexcept>
 #include <string>
 #include <vector>
 
-#include <sycl/sycl.hpp>
-
-#include "evp_base.hh"
+#include "trl/impl/openmp/evp_base.hh"
+#include "trl/impl/openmp/util.hh"
 
 // CSR (Compressed Sparse Row) matrix storage
 struct CSRMatrix {
@@ -23,7 +22,7 @@ struct CSRMatrix {
 };
 
 // Read a Matrix Market file and assemble into CSR format using USM
-inline CSRMatrix load_matrix_market(const std::string& filepath, sycl::queue& queue)
+inline CSRMatrix load_matrix_market(const std::string& filepath)
 {
   std::ifstream file(filepath);
   if (!file) throw std::runtime_error("Error: cannot open file " + filepath);
@@ -40,9 +39,7 @@ inline CSRMatrix load_matrix_market(const std::string& filepath, sycl::queue& qu
         // Convert to lowercase for case-insensitive comparison
         std::string lower_line = line;
         std::transform(lower_line.begin(), lower_line.end(), lower_line.begin(), ::tolower);
-        if (lower_line.find("symmetric") != std::string::npos) {
-          is_symmetric = true;
-        }
+        if (lower_line.find("symmetric") != std::string::npos) is_symmetric = true;
       }
       continue;
     }
@@ -91,9 +88,9 @@ inline CSRMatrix load_matrix_market(const std::string& filepath, sycl::queue& qu
   matrix.num_cols = num_cols;
   matrix.num_nonzeros = num_nonzeros;
 
-  matrix.row_offsets = sycl::malloc_shared<int>(num_rows + 1, queue);
-  matrix.col_indices = sycl::malloc_shared<int>(num_nonzeros, queue);
-  matrix.values = sycl::malloc_shared<double>(num_nonzeros, queue);
+  matrix.row_offsets = (int*)std::aligned_alloc(64, (num_rows + 1) * sizeof(int));
+  matrix.col_indices = (int*)std::aligned_alloc(64, num_nonzeros * sizeof(int));
+  matrix.values = (double*)std::aligned_alloc(64, num_nonzeros * sizeof(double));
 
   if (!matrix.row_offsets || !matrix.col_indices || !matrix.values) throw std::runtime_error("USM allocation failed");
 
@@ -101,9 +98,7 @@ inline CSRMatrix load_matrix_market(const std::string& filepath, sycl::queue& qu
   for (int i = 0; i <= num_rows; i++) matrix.row_offsets[i] = 0;
 
   // Count entries per row
-  for (int i = 0; i < num_nonzeros; i++) {
-    matrix.row_offsets[coo_rows[i] + 1]++;
-  }
+  for (int i = 0; i < num_nonzeros; i++) matrix.row_offsets[coo_rows[i] + 1]++;
 
   // Convert counts to prefix sum (row_offsets)
   for (int i = 1; i <= num_rows; i++) matrix.row_offsets[i] += matrix.row_offsets[i - 1];
@@ -118,17 +113,15 @@ inline CSRMatrix load_matrix_market(const std::string& filepath, sycl::queue& qu
     matrix.values[pos] = coo_vals[i];
   }
 
-  queue.wait();
-
   return matrix;
 }
 
 // Free CSR matrix USM allocations
-inline void free_csr_matrix(CSRMatrix& matrix, sycl::queue& queue)
+inline void free_csr_matrix(CSRMatrix& matrix)
 {
-  if (matrix.row_offsets) sycl::free(matrix.row_offsets, queue);
-  if (matrix.col_indices) sycl::free(matrix.col_indices, queue);
-  if (matrix.values) sycl::free(matrix.values, queue);
+  if (matrix.row_offsets) std::free(matrix.row_offsets);
+  if (matrix.col_indices) std::free(matrix.col_indices);
+  if (matrix.values) std::free(matrix.values);
   matrix.row_offsets = nullptr;
   matrix.col_indices = nullptr;
   matrix.values = nullptr;
@@ -137,15 +130,15 @@ inline void free_csr_matrix(CSRMatrix& matrix, sycl::queue& queue)
 // CSR-based eigenvalue problem that inherits from StandardEVPBase
 // Implements Y = A * X using a simple SYCL SpMM kernel
 template <class T, unsigned int bs>
-class CSREVP : public StandardEVPBase<T, bs> {
+class CSREVP : public trl::openmp::EVPBase<T, bs> {
 public:
-  using Base = StandardEVPBase<T, bs>;
+  using Base = trl::openmp::EVPBase<T, bs>;
 
-  CSREVP(sycl::queue queue, const std::string& matrix_file)
-      : Base(queue, 0) // N will be set after loading
+  CSREVP(const std::string& matrix_file)
+      : Base(0) // N will be set after loading
   {
     // Load the matrix from Matrix Market file
-    matrix_ = load_matrix_market(matrix_file, this->queue);
+    matrix_ = load_matrix_market(matrix_file);
 
     if (matrix_.num_rows != matrix_.num_cols) throw std::runtime_error("CSREVP requires a square matrix");
 
@@ -154,7 +147,7 @@ public:
     this->Vtemp.emplace(this->create_multivector(this->N, bs));
   }
 
-  ~CSREVP() { free_csr_matrix(matrix_, this->queue); }
+  ~CSREVP() { free_csr_matrix(matrix_); }
 
   void apply(typename Base::BlockView X, typename Base::BlockView Y)
   {
@@ -168,22 +161,26 @@ public:
     const double* values = matrix_.values;
     const std::size_t num_rows = matrix_.num_rows;
 
-    this->queue.parallel_for(sycl::range<1>(num_rows), [=](sycl::id<1> idx) {
-      const std::size_t row = idx[0];
+#pragma omp parallel for
+    for (std::size_t row = 0; row < num_rows; ++row) {
       const int row_start = row_offsets[row];
       const int row_end = row_offsets[row + 1];
 
-      // Initialize output row to zero
-      for (std::size_t j = 0; j < bs; ++j) Y_data[row * bs + j] = T(0);
+      alignas(64) T y_local[bs];
+#pragma omp simd
+      for (std::size_t j = 0; j < bs; ++j) y_local[j] = T(0);
 
-      // Accumulate contributions from all nonzeros in this row
       for (int k = row_start; k < row_end; ++k) {
-        const std::size_t col = col_indices[k];
+        const std::size_t col = static_cast<std::size_t>(col_indices[k]);
         const T val = static_cast<T>(values[k]);
 
-        for (std::size_t j = 0; j < bs; ++j) Y_data[row * bs + j] += val * X_data[col * bs + j];
+#pragma omp simd
+        for (std::size_t j = 0; j < bs; ++j) y_local[j] += val * X_data[col * bs + j];
       }
-    });
+
+#pragma omp simd
+      for (std::size_t j = 0; j < bs; ++j) Y_data[row * bs + j] = y_local[j];
+    }
   }
 
 private:

@@ -5,7 +5,8 @@ namespace trl {
 struct EigensolverParams {
   unsigned int nev;
   unsigned int ncv;
-  unsigned int max_restarts;
+  unsigned int max_restarts = 1000;
+  double tolerance = 1e-8;
 };
 
 struct EigensolverResult {
