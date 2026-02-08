@@ -18,11 +18,20 @@ jobs:
     - name: Install dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install -y cmake g++ libeigen3-dev libomp-dev
-        
+        sudo apt-get install -y git cmake libeigen3-dev libomp-dev clang-18 libclang-18-dev libomp-18-dev lld-18
+
+    - name: Compile AdaptiveCpp
+      run: |
+        git clone https://github.com/AdaptiveCpp/AdaptiveCpp.git
+        cd AdaptiveCpp
+        mkdir build
+        cd build
+        cmake .. -DCMAKE_INSTALL_PREFIX=${GITHUB_WORKSPACE}/acpp_install -DWITH_OPENCL_BACKEND=Off
+        make -j install
+
     - name: Configure CMake
       run: |
-        cmake -B build -DCMAKE_BUILD_TYPE=Release -DWITH_SYCL_BACKEND=OFF
+        cmake -B build -DCMAKE_CXX_COMPILER=clang++-18 -DCMAKE_BUILD_TYPE=Release -DWITH_SYCL_BACKEND=On -DAdaptiveCpp_DIR=${GITHUB_WORKSPACE}/acpp_install/lib/cmake/AdaptiveCpp
     - name: Build
       run: |
         cmake --build build --config Release
