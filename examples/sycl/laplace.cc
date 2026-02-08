@@ -14,13 +14,16 @@ int main()
   sycl::queue q;
 
   // Problem size
-  const int N = 100;
+  const int N = 256;
 
   // Number of eigenvalues to compute
-  const unsigned int nev = 8;
+  const unsigned int nev = 16;
 
   // Size of Krylov subspace (must be larger than nev)
-  const unsigned int ncv = 32;
+  const unsigned int ncv = 64;
+
+  // Blocksize
+  const unsigned int bs = 16;
 
   std::cout << "================================================\n";
   std::cout << "Block Lanczos Eigenvalue Solver Example\n";
@@ -32,13 +35,13 @@ int main()
   std::cout << "================================================\n\n";
 
   // Create the 1D Laplacian eigenvalue problem
-  auto evp = std::make_shared<trl::OneDLaplaceEVP<double, 1>>(q, N);
+  auto evp = std::make_shared<trl::OneDLaplaceEVP<double, bs>>(q, N);
 
   // Set up eigensolver parameters
   trl::EigensolverParams params{nev, ncv};
 
   // Create the Block Lanczos solver
-  trl::BlockLanczos<trl::OneDLaplaceEVP<double, 1>> solver(evp, params);
+  trl::BlockLanczos solver(evp, params);
 
   // Initialize the starting vector with random values
   auto V0 = solver.initial_block();
@@ -59,7 +62,7 @@ int main()
   std::cout << "Converged eigenvalues: " << solver.get_nconv() << " / " << nev << "\n\n";
 
   // Display the computed eigenvalues
-  const auto* eigenvalues = solver.get_eigenvalues();
+  const auto* eigenvalues = evp->get_current_eigenvalues();
   std::cout << "Computed eigenvalues:\n";
   for (unsigned int i = 0; i < std::min(nev, solver.get_nconv()); ++i) {
     // Analytical eigenvalues for 1D Laplacian: λ_k = 2(1 - cos(kπ/(N+1)))

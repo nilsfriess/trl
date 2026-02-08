@@ -1,6 +1,12 @@
 build/
 optbuild/
+debugbuild/
+cmake-build-debug/
 .idea/
 
 # Ignore emacs files
 *~
+
+*.#*
+
+\#*#

@@ -14,14 +14,21 @@ template <class MBV>
 concept MatrixBlockViewConcept = requires(MBV mbv, const MBV& other) {
   typename MBV::EntryType;
 
-  /** @brief Pointer to the underlying data */
-  { mbv.data } -> std::convertible_to<typename MBV::EntryType*>;
-
   /** @brief Copy data from another matrix block view */
   { mbv.copy_from(other) } -> std::same_as<void>;
 
   /** @brief Copy and transpose data from another matrix block view */
   { mbv.copy_from_transpose(other) } -> std::same_as<void>;
+
+  /** @brief Zero the given block */
+  { mbv.set_zero() } -> std::same_as<void>;
+
+  /** @brief Multiply by another block view and store in a block view */
+  { mbv.mult(other, other) } -> std::same_as<void>;
+
+  // TODO: Make this work
+  // /** @brief Sets the diagonal */
+  // { mbv.set_diagonal(...) } -> std::same_as<void>;
 };
 
 /** @brief Concept for block matrices
@@ -53,17 +60,17 @@ concept BlockMatrixConcept = requires(BM bm, std::size_t i, std::size_t j) {
  *  the underlying data.
  */
 template <class BV>
-concept BlockVectorView = requires(BV bv, const BV& other) {
+concept BlockVectorView = requires(BV bv, const BV& other, const BV::MatrixBlockView& W) {
   typename BV::EntryType;
+
+  /** @brief Zeros the given block */
+  { bv.set_zero() } -> std::same_as<void>;
 
   /** @brief Number of rows in the block vector */
   { bv.rows() } -> std::same_as<std::size_t>;
 
   /** @brief Number of columns (i.e., number of vectors in the block) */
   { bv.cols() } -> std::same_as<std::size_t>;
-
-  /** @brief Pointer to the underlying data */
-  { bv.data } -> std::convertible_to<typename BV::EntryType*>;
 
   /** @brief Copy data from another block vector
    *
@@ -78,10 +85,11 @@ concept BlockVectorView = requires(BV bv, const BV& other) {
    */
   { bv -= other } -> std::same_as<BV&>;
 
-  // TODO: We don't check the exact signatures of dot, mult, mult_transpose, and
-  // subtract_product here because different implementations may use different
-  // types for the matrix parameter (MatrixBlockView, raw pointer, etc.).
-  // We should think about how to formalize this in this concept.
+  /** @brief Computes this += W * Y, where W is a small matrix and Y is another block view */
+  { bv.mult_add(W, other) } -> std::same_as<void>;
+
+  /** @brief Computes Y = this * W, where W is a small matrix and Y is another block view */
+  { bv.mult(W, other) } -> std::same_as<void>;
 };
 
 /** @brief Concept for block multivectors
@@ -191,10 +199,11 @@ concept Eigenproblem =
        *  The output data is supposed to be managed by the EVP object.
        *
        *  @param T The block tridiagonal matrix (input)
-       *  @param eigvals Vector to store the computed eigenvalues (output)
-       *  @param eigvecs BlockMatrix to store the computed eigenvectors (output)
        */
-      { evp.solve_small_dense(B_mat, eigvals, eigvecs) } -> std::same_as<void>;
+      { evp.solve_small_dense(B_mat, B, std::size_t{}) } -> std::same_as<std::size_t>;
+
+      { evp.get_current_eigenvalues() };
+      { evp.get_current_eigenvectors() } -> std::same_as<const typename EVP::BlockMultivector::BlockMatrix&>;
     } &&
     (
         /** @brief Ensure that the blocksize of the eigenproblem and the blocksize of the BlockMultivector coincide */
