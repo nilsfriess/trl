@@ -114,7 +114,4 @@ bool test_lanczos_extend(std::shared_ptr<EVP> evp, TestHelper& helper, typename 
   else std::cout << "Not passed. Max error: " << max_error << std::endl;
 
   return passed;
-
-  std::cout << (passed ? "" : "not ") << "passed\n";
-  return passed;
 }

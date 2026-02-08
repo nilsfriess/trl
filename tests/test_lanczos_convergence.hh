@@ -4,6 +4,7 @@
 #include <trl/eigensolvers/lanczos.hh>
 
 #include <memory>
+#include <vector>
 
 #include "helpers.hh"
 
@@ -29,7 +30,7 @@ bool test_lanczos_convergence(std::shared_ptr<EVP> evp, TestHelper& helper, cons
   auto res = lanczos.solve();
   helper.sync();
 
-  if (true or res.converged) {
+  if (res.converged) {
     std::cout << "Eigensolver converged in " << res.iterations << " iterations (" << res.n_op_apply << " operator applications).\n";
     std::cout << "Checking computed eigenvalues against exact values...\n";
 
@@ -40,7 +41,7 @@ bool test_lanczos_convergence(std::shared_ptr<EVP> evp, TestHelper& helper, cons
       std::cout << "In test_lanczos_convergence: Number of computed eigenvalues is smaller than number of requested eigenvalues, " << ev_host.size() << " vs. " << exact_eigenvalues.size() << "\n";
     }
     for (unsigned int i = 0; i < nev; ++i) {
-      if (std::abs(ev_host[i] - exact_eigenvalues[i]) > 1e-8) {
+      if (std::abs(ev_host[i] - exact_eigenvalues[i]) > tolerance * std::abs(exact_eigenvalues[i])) {
         std::cout << "In test_lanczos_convergence: Eigenvalue " << i << " differs from exact, computed " << ev_host[i] << ", expected " << exact_eigenvalues[i] << ", error "
                   << std::abs(ev_host[i] - exact_eigenvalues[i]) << "\n";
         passed = false;

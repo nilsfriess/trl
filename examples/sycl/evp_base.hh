@@ -3,9 +3,12 @@
 #include <Eigen/Core>
 #include <Eigen/Dense>
 
+#include <iostream>
 #include <optional>
 #include <span>
+
 #include <sycl/sycl.hpp>
+
 #include <trl/impl/sycl/multivector.hh>
 
 template <class T, unsigned int bs>
@@ -27,7 +30,10 @@ public:
     if (N > 0) Vtemp.emplace(create_multivector(N, bs));
   }
 
-  virtual ~StandardEVPBase() = default;
+  virtual ~StandardEVPBase()
+  {
+    if (eigenvalues) sycl::free(eigenvalues, queue);
+  }
 
   virtual void apply(BlockView X, BlockView Y) = 0;
 

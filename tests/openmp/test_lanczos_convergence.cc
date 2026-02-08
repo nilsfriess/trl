@@ -31,7 +31,7 @@ bool run_test_diagonal()
   std::vector<Scalar> exact_eigenvalues(nev);
   for (std::size_t i = 0; i < nev; ++i) exact_eigenvalues[i] = (N - i) * (N - i);
 
-  const Scalar tol = Scalar(1e-12);
+  const Scalar tol = Scalar(1e-8);
   return test_lanczos_convergence(evp, helper, exact_eigenvalues, tol);
 }
 
@@ -53,7 +53,7 @@ bool run_test_laplace()
   const Scalar pi = std::acos(Scalar(-1));
   for (std::size_t i = 0; i < nev; ++i) exact_eigenvalues[i] = Scalar(2) - Scalar(2) * std::cos((N - i) * pi / (N + 1));
 
-  const Scalar tol = Scalar(1e-12);
+  const Scalar tol = Scalar(1e-8);
   return test_lanczos_convergence(evp, helper, exact_eigenvalues, tol);
 }
 

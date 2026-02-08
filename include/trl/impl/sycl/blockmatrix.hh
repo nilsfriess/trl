@@ -2,6 +2,8 @@
 
 #include <cassert>
 #include <cstddef>
+#include <iostream>
+#include <iomanip>
 
 #include <sycl/sycl.hpp>
 
