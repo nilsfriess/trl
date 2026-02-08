@@ -18,7 +18,7 @@ jobs:
     - name: Install dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install -y cmake g++ libeigen3-dev
+        sudo apt-get install -y cmake g++ libeigen3-dev libomp-dev
         
     - name: Configure CMake
       run: |

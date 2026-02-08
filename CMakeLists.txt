@@ -13,6 +13,8 @@ if(${WITH_SYCL_BACKEND})
   find_package(AdaptiveCpp REQUIRED)
 endif()
 
+find_package(OpenMP)
+
 
 # Create header-only library target
 add_library(trl INTERFACE)
@@ -20,6 +22,10 @@ add_library(trl::trl ALIAS trl)
 
 find_package(Eigen3 NO_MODULE REQUIRED)
 target_link_libraries(trl INTERFACE Eigen3::Eigen)
+
+if(OpenMP_CXX_FOUND)
+  target_link_libraries(trl INTERFACE OpenMP::OpenMP_CXX)
+endif()
 
 target_include_directories(trl INTERFACE
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
