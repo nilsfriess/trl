@@ -1,9 +1,11 @@
-// Example: Compute largest eigenvalues of a sparse matrix from a Matrix Market file
+// Example: Compute eigenvalues of Ax = \lambda Bx using a shift-invert spectral transformation
 //
-// Usage: ./csrtest <matrix.mtx> [nev] [ncv]
-//   matrix.mtx: Path to a Matrix Market file containing a symmetric sparse matrix
+// Usage: ./gevp_test <matrixA.mtx> <matrixB.mtx> [nev] [ncv] [shift]
+//   matrixA.mtx: Path to a Matrix Market file containing a symmetric sparse matrix (the A matrix)
+//   matrixB.mtx: Path to a Matrix Market file containing a symmetric positive semi-definite sparse matrix (the B matrix)
 //   nev: Number of eigenvalues to compute (default: 16)
 //   ncv: Number of Lanczos vectors (default: 4 * nev)
+//   shift: Shift used in the shift-invert transformation (default: 1e-3)
 
 #include <chrono>
 #include <cstdlib>
@@ -17,66 +19,76 @@
 #include <Eigen/Core>
 #include <Spectra/MatOp/SparseSymMatProd.h>
 #include <Spectra/SymEigsSolver.h>
+#include <Spectra/SymGEigsShiftSolver.h>
 #include <unsupported/Eigen/SparseExtra>
 #include <unsupported/Eigen/src/SparseExtra/MarketIO.h>
 
+#include "Spectra/MatOp/SymShiftInvert.h"
 #include "csrevp.hh"
 
-constexpr unsigned int BLOCKSIZE = 4;
+constexpr unsigned int BLOCKSIZE = 1;
 
 int main(int argc, char* argv[])
 {
-  if (argc < 2) {
-    std::cerr << "Usage: " << argv[0] << " <matrix.mtx> [nev] [ncv]\n";
-    std::cerr << "  matrix.mtx: Path to a Matrix Market file\n";
+  if (argc < 3) {
+    std::cerr << "Usage: " << argv[0] << " <matrixA.mtx> <matrixB.mtx> [nev] [ncv]\n";
+    std::cerr << "  matrixA.mtx: Path to a Matrix Market file (the A matrix)\n";
+    std::cerr << "  matrixB.mtx: Path to a Matrix Market file (the B matrix)\n";
     std::cerr << "  nev: Number of eigenvalues to compute (default: 10)\n";
     std::cerr << "  ncv: Number of Lanczos vectors (default: 4 * nev)\n";
     return 1;
   }
 
-  std::string matrix_file = argv[1];
-  unsigned int nev = (argc > 2) ? std::atoi(argv[2]) : 16;
-  unsigned int ncv = (argc > 3) ? std::atoi(argv[3]) : 4 * nev;
+  std::string matrix_file_A = argv[1];
+  std::string matrix_file_B = argv[2];
+  unsigned int nev = (argc > 3) ? std::atoi(argv[3]) : 16;
+  unsigned int ncv = (argc > 4) ? std::atoi(argv[4]) : 4 * nev;
+  double shift = (argc > 5) ? std::atof(argv[5]) : 1e-3;
 
   std::cout << "========================================\n";
-  std::cout << "    CSR Sparse Matrix Eigensolver      \n";
+  std::cout << "   CSR Sparse Generalized Eigensolver   \n";
   std::cout << "========================================\n";
-  std::cout << "Matrix file: " << matrix_file << "\n";
-  std::cout << "nev = " << nev << ", ncv = " << ncv << ", blocksize = " << BLOCKSIZE << "\n";
+  std::cout << "Matrix file A: " << matrix_file_A << "\n";
+  std::cout << "Matrix file B: " << matrix_file_B << "\n";
+  std::cout << "nev = " << nev << ", ncv = " << ncv << ", shift = " << shift << ", blocksize = " << BLOCKSIZE << "\n";
 
   try {
-    // Create the eigenvalue problem from the matrix file
-    using EVP = CSREVP<double, BLOCKSIZE>;
-    auto evp = std::make_shared<EVP>(matrix_file);
+    // Create the eigenvalue problem from the matrix files
+    using EVP = CSRGeneralizedEVP<double, BLOCKSIZE>;
+    auto evp = std::make_shared<EVP>(matrix_file_A, matrix_file_B, shift);
 
     std::cout << "Matrix size: " << evp->size() << " x " << evp->size() << "\n\n";
 
     // Set up the Lanczos solver
-    trl::EigensolverParams params{.nev = nev, .ncv = ncv, .max_restarts = 1000, .tolerance = 1e-10};
+    trl::EigensolverParams params{.nev = nev, .ncv = ncv, .max_restarts = 1000, .tolerance = 1e-8};
 
     // Create the Spectra solver object to compute the reference solution
-    Eigen::SparseMatrix<double> A;
-    Eigen::loadMarket(A, matrix_file);
-    using Op = Spectra::SparseSymMatProd<double>;
-    Op op(A);
-    Spectra::SymEigsSolver<Op> eigs(op, params.nev, params.ncv);
+    Eigen::SparseMatrix<double, Eigen::ColMajor> A;
+    Eigen::SparseMatrix<double, Eigen::ColMajor> B;
+    Eigen::loadMarket(A, matrix_file_A);
+    Eigen::loadMarket(B, matrix_file_B);
+
+    using Op = Spectra::SymShiftInvert<double>;
+    using BOp = Spectra::SparseSymMatProd<double>;
+    Op op(A, B);
+    BOp Bop(B);
+    Spectra::SymGEigsShiftSolver<Op, BOp, Spectra::GEigsMode::ShiftInvert> geigs(op, Bop, nev, ncv, shift);
     constexpr std::size_t num_runs = 1;
 
     Eigen::VectorXd evalues;
     std::chrono::duration<double, std::milli> spectra_total{0};
     for (std::size_t i = 0; i < num_runs; ++i) {
-      Spectra::SymEigsSolver<Op> eigs(op, params.nev, params.ncv);
-      eigs.init();
+      geigs.init();
 
       std::cout << "Running Spectra...\n";
       auto start = std::chrono::steady_clock::now();
-      eigs.compute();
+      geigs.compute(Spectra::SortRule::LargestMagn, 1000, 1e-8, Spectra::SortRule::SmallestAlge);
       auto end = std::chrono::steady_clock::now();
       auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
       spectra_total += elapsed;
       std::cout << "Run " << i << ", took: " << elapsed.count() << "ms\n";
 
-      if (i + 1 == num_runs && eigs.info() == Spectra::CompInfo::Successful) evalues = eigs.eigenvalues();
+      if (i + 1 == num_runs && geigs.info() == Spectra::CompInfo::Successful) evalues = geigs.eigenvalues();
     }
 
     const double spectra_avg = spectra_total.count() / static_cast<double>(num_runs);
@@ -121,12 +133,28 @@ int main(int argc, char* argv[])
     std::cout << "Computed eigenvalues (largest " << nev << "):\n";
     std::cout << std::fixed << std::setprecision(10);
 
-    auto eigenvalues = evp->get_current_eigenvalues();
-    for (unsigned int i = 0; i < nev; ++i) std::cout << "  λ[" << std::setw(3) << i << "] = " << eigenvalues[i] << "\n";
+    auto trl_evals_raw = evp->get_current_eigenvalues();
+    std::vector<double> trl_evals_transformed;
+    trl_evals_transformed.reserve(nev);
+    for (unsigned int i = 0; i < nev; ++i) {
+      double mu = trl_evals_raw[i];
+      double val = shift + 1.0 / mu;
+      trl_evals_transformed.push_back(val);
+      std::cout << "  λ[" << std::setw(3) << i << "] = " << val << " (μ = " << mu << ")\n";
+    }
+
+    // Sort both sets of eigenvalues to compare them (Spectra and TRL might use different sorting)
+    std::vector<double> spectra_evals_vec(evalues.data(), evalues.data() + evalues.size());
+    std::sort(spectra_evals_vec.begin(), spectra_evals_vec.end());
+    std::sort(trl_evals_transformed.begin(), trl_evals_transformed.end());
 
     // Compare with spectra results
-    std::cout << "Difference between ours and Spectra:\n";
-    for (std::size_t i = 0; i < params.nev; ++i) std::cout << "  Eigenvalue " << i << ": " << std::abs(eigenvalues[i] - evalues[i]) / std::abs(evalues[i]) << "\n";
+    std::cout << "Difference between ours and Spectra (sorted):\n";
+    for (std::size_t i = 0; i < params.nev; ++i) {
+      double val_ours = trl_evals_transformed[i];
+      double val_spectra = spectra_evals_vec[i];
+      std::cout << "  Eigenvalue " << i << ": " << std::abs(val_ours - val_spectra) / std::abs(val_spectra) << "\n";
+    }
 
     std::cout << "\n========================================\n";
   }
