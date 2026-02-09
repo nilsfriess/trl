@@ -152,7 +152,7 @@ public:
       // Reorthogonalise against all previous blocks
       for (unsigned int j = 0; j < k + 1; ++j) {
         auto Vj = V.block_view(j);
-        Vj.dot(Vk1, Z0);
+        evp->dot(Vj, Vk1, Z0);
         Vk1.subtract_product(Vj, Z0);
       }
 
