@@ -13,8 +13,8 @@ if(${WITH_SYCL_BACKEND})
   find_package(AdaptiveCpp REQUIRED)
 endif()
 
-find_package(OpenMP)
-
+# The OpenMP backend is always built
+find_package(OpenMP REQUIRED)
 
 # Create header-only library target
 add_library(trl INTERFACE)

@@ -34,12 +34,12 @@ public:
 
   virtual void apply(BlockView, BlockView) = 0;
 
-  void dot(BlockView V, BlockView W, BlockMatrixBlockView R) { V.dot(W, R); }
+  virtual void dot(BlockView V, BlockView W, BlockMatrixBlockView R) { V.dot(W, R); }
 
-  void orthonormalize(BlockView V, BlockMatrixBlockView R)
+  virtual void orthonormalize(BlockView V, BlockMatrixBlockView R)
   {
     // 1. Compute Gram matrix G = V^T * V (stored in R)
-    V.dot(V, R);
+    this->dot(V, V, R);
 
     // 2. ComputN Cholesky factorisation of Gram matrix
     // G = U^T * U where U is upper triangular
@@ -68,7 +68,7 @@ public:
 
   BlockMatrix create_blockmatrix(std::size_t block_rows, std::size_t block_cols) const { return BlockMatrix(block_rows, block_cols); }
 
-  std::size_t solve_small_dense(const BlockMatrix& B, BlockMatrixBlockView beta, std::size_t nev)
+  virtual std::size_t solve_small_dense(const BlockMatrix& B, BlockMatrixBlockView beta, std::size_t nev)
   {
     const auto n_total = B.block_rows() * blocksize;
 
@@ -133,7 +133,6 @@ public:
       const ScalarT theta = eigenvalues[col_idx];
       const ScalarT denom = std::max(std::abs(theta), eps);
       const ScalarT rel_residual = residual_norm / denom;
-      // if (col_idx < 16) std::cout << "    Eigenvalue " << col_idx << ": " << residual_norm << "\n";
 
       if (rel_residual < tolerance_) n_converged++;
     }
