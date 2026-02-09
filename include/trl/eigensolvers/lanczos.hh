@@ -41,9 +41,15 @@ public:
 
     if (nev >= ncv) throw std::invalid_argument("nev must be strictly smaller than ncv");
 
-    if constexpr (requires { evp->set_tolerance(Scalar(0)); }) {
-      evp->set_tolerance(static_cast<Scalar>(params.tolerance));
+    // Validate that we have enough space for thick restart
+    // After restart, we keep k_restart = nev/blocksize + 1 blocks, and need at least 1 more to extend
+    unsigned int min_ncv_blocks = nev / blocksize + 2;
+    if (ncv / blocksize < min_ncv_blocks) {
+      throw std::invalid_argument("ncv (" + std::to_string(ncv) + ") is too small for thick restart with nev=" + std::to_string(nev) + " and blocksize=" + std::to_string(blocksize) +
+                                  ". Minimum required: ncv >= " + std::to_string(min_ncv_blocks * blocksize) + ".");
     }
+
+    if constexpr (requires { evp->set_tolerance(Scalar(0)); }) evp->set_tolerance(static_cast<Scalar>(params.tolerance));
   }
 
   /** @brief Solves the eigenvalue problem using thick-restart Lanczos
@@ -81,6 +87,13 @@ public:
       // We did not converge yet, so now we must prepare for restart. We begin by computing
       // the Ritz vectors that we will keep.
       auto k_restart = nev / blocksize + 1;
+
+      // Check if we have enough space for restart
+      if (k_restart >= ncv / blocksize) {
+        // Not enough space to restart - return with partial convergence
+        break;
+      }
+
       const auto& Y = evp->get_current_eigenvectors();
       for (std::size_t j = 0; j < k_restart; ++j) {
         auto Wj = W.block_view(j);
