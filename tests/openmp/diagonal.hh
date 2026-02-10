@@ -24,7 +24,7 @@ public:
 #pragma omp parallel for
     for (std::size_t k = 0; k < diag.size(); ++k)
 #pragma omp simd
-      for (unsigned int i = 0; i < bs; ++i) Y.data[k * bs + i] = diag[k] * X.data[k * bs + i];
+      for (unsigned int i = 0; i < bs; ++i) Y.data_[k * bs + i] = diag[k] * X.data_[k * bs + i];
   }
 
 private:

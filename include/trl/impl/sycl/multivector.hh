@@ -10,6 +10,15 @@
 #include "blockview.hh"
 
 namespace trl::sycl {
+/** @brief SYCL multivector backed by USM shared memory.
+ *
+ *  Backend specifics:
+ *  - Allocates USM shared memory on construction.
+ *  - Stores a ::sycl::queue by value for submissions.
+ *  - Assumes an in-order queue for implicit dependency ordering.
+ *  - Copy constructor allocates new storage and zero-initializes it; it does
+ *    not copy the underlying data.
+ */
 template <class T, unsigned int bs>
 class BlockMultivector {
 public:
@@ -97,10 +106,6 @@ public:
 
   std::size_t blocks() const { return blocks_; }
 
-  /** @brief Subtract another blockvector from this one
-   *
-   *  Computes this -= other for all blocks.
-   */
   BlockMultivector& operator-=(const BlockMultivector& other)
   {
     assert(rows == other.rows);
@@ -115,37 +120,12 @@ public:
     return *this;
   }
 
-  /** @brief Multiply this blockvector by a blockmatrix and store in result
-   *
-   *  Computes result = this * matrix using all blocks.
-   *  Equivalent to calling mult(matrix, result, blocks() - 1).
-   *
-   *  @param matrix The block matrix to multiply with
-   *  @param result The blockvector to store the result
-   */
   void mult(const BlockMatrix& matrix, BlockMultivector& result)
   {
     assert(false && "not implemented");
     mult(matrix, result, blocks_ - 1);
   }
 
-  /** @brief Multiply this blockvector by a blockmatrix and store in result
-   *
-   *  Computes result = this * matrix, where:
-   *  - this is a blockvector with blocks() blocks (each block is rows × bs)
-   *  - matrix is a blockmatrix with block_rows and block_cols
-   *  - result is a blockvector
-   *
-   *  Only blocks 0 to to_block (inclusive) are involved in the computation.
-   *  Each block of the result is computed as:
-   *  result_block[j] = sum_{i=0}^{to_block} (this_block[i] * matrix_block[i,j])
-   *
-   *  Performance optimized: queues all GEMM operations before synchronization.
-   *
-   *  @param matrix The block matrix to multiply with
-   *  @param result The blockvector to store the result
-   *  @param to_block Last block index to include (inclusive), must be < blocks()
-   */
   void mult(const BlockMatrix& matrix, BlockMultivector& result, std::size_t to_block)
   {
     // Verify dimension constraints

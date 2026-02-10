@@ -1,0 +1,14 @@
+# Sphinx build outputs
+_build/
+_static/
+_templates/
+
+# Doxygen outputs
+doxygen/
+
+# Python virtual environment
+venv/
+
+# Python cache
+__pycache__/
+*.pyc

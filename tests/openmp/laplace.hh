@@ -22,10 +22,10 @@ public:
 #pragma omp parallel for
     for (std::size_t k = 0; k < n; ++k) {
       for (unsigned int i = 0; i < bs; ++i) {
-        T val = T(2) * X.data[k * bs + i];
-        if (k > 0) val -= X.data[(k - 1) * bs + i];
-        if (k + 1 < n) val -= X.data[(k + 1) * bs + i];
-        Y.data[k * bs + i] = val;
+        T val = T(2) * X.data_[k * bs + i];
+        if (k > 0) val -= X.data_[(k - 1) * bs + i];
+        if (k + 1 < n) val -= X.data_[(k + 1) * bs + i];
+        Y.data_[k * bs + i] = val;
       }
     }
   }
