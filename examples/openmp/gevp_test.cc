@@ -105,7 +105,7 @@ int main(int argc, char* argv[])
       auto V0 = lanczos.initial_block();
       std::mt19937 rng(42);
       std::normal_distribution<double> dist;
-      std::generate_n(V0.data, V0.rows() * V0.cols(), [&]() { return dist(rng); });
+      std::generate_n(V0.data_, V0.rows() * V0.cols(), [&]() { return dist(rng); });
 
       // Solve
       std::cout << "Running Block Lanczos...\n";

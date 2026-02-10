@@ -43,7 +43,7 @@ public:
 
     // 2. ComputN Cholesky factorisation of Gram matrix
     // G = U^T * U where U is upper triangular
-    Eigen::Map<Eigen::Matrix<ScalarT, blocksize, blocksize, Eigen::RowMajor>> RR(R.data);
+    Eigen::Map<Eigen::Matrix<ScalarT, blocksize, blocksize, Eigen::RowMajor>> RR(R.data_);
     Eigen::LLT<Eigen::Matrix<ScalarT, Eigen::Dynamic, Eigen::Dynamic>> llt(RR);
     if (llt.info() != Eigen::Success) throw std::runtime_error("Cholesky factorization failed in orthonormalize");
     RR = llt.matrixL().transpose();
@@ -79,7 +79,7 @@ public:
       for (std::size_t j = 0; j < B.block_cols(); ++j) {
         auto block = B.block_view(i, j);
         for (unsigned int bi = 0; bi < blocksize; ++bi)
-          for (unsigned int bj = 0; bj < blocksize; ++bj) B_dense(i * blocksize + bi, j * blocksize + bj) = block.data[bi * blocksize + bj];
+          for (unsigned int bj = 0; bj < blocksize; ++bj) B_dense(i * blocksize + bi, j * blocksize + bj) = block.data_[bi * blocksize + bj];
       }
     }
 
@@ -101,7 +101,7 @@ public:
         for (unsigned int bi = 0; bi < blocksize; ++bi) {
           for (unsigned int bj = 0; bj < blocksize; ++bj) {
             // Reverse column order to match descending eigenvalue order
-            block.data[bi * blocksize + bj] = solver.eigenvectors()(i * blocksize + bi, n_total - 1 - (j * blocksize + bj));
+            block.data_[bi * blocksize + bj] = solver.eigenvectors()(i * blocksize + bi, n_total - 1 - (j * blocksize + bj));
           }
         }
       }
@@ -125,7 +125,7 @@ public:
       ScalarT norm_sq = 0.0;
       for (unsigned int i = 0; i < blocksize; ++i) {
         ScalarT sum = 0.0;
-        for (unsigned int k = 0; k < blocksize; ++k) sum += beta.data[i * blocksize + k] * v_last.data[k * blocksize + col_in_block];
+        for (unsigned int k = 0; k < blocksize; ++k) sum += beta.data_[i * blocksize + k] * v_last.data_[k * blocksize + col_in_block];
         norm_sq += sum * sum;
       }
 

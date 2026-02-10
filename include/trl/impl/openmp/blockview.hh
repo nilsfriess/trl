@@ -14,14 +14,14 @@ public:
   using EntryType = ScalarT;
   using MatrixBlockView = typename BlockMatrix<ScalarT, block_size>::BlockView;
 
-  void set_zero() { std::fill_n(data, n * block_size, 0); }
+  void set_zero() { std::fill_n(data_, n_ * block_size, 0); }
 
-  std::size_t rows() const { return n; }
+  std::size_t rows() const { return n_; }
   constexpr std::size_t cols() const { return block_size; }
 
   BlockView(ScalarT* data, std::size_t n)
-      : data(data)
-      , n(n)
+      : data_(data)
+      , n_(n)
   {
   }
 
@@ -33,13 +33,13 @@ public:
   void copy_from(BlockView other)
   {
 #pragma omp parallel for
-    for (std::size_t i = 0; i < n * block_size; ++i) data[i] = other.data[i];
+    for (std::size_t i = 0; i < n_ * block_size; ++i) data_[i] = other.data_[i];
   }
 
   BlockView& operator-=(BlockView other)
   {
 #pragma omp parallel for
-    for (std::size_t i = 0; i < n * block_size; ++i) data[i] -= other.data[i];
+    for (std::size_t i = 0; i < n_ * block_size; ++i) data_[i] -= other.data_[i];
     return *this;
   }
 
@@ -47,17 +47,17 @@ public:
   {
     // other += this * W
 #pragma omp parallel for
-    for (std::size_t k = 0; k < n; ++k) {
+    for (std::size_t k = 0; k < n_; ++k) {
       alignas(64) std::array<ScalarT, block_size> tmp{};
       for (std::size_t i = 0; i < block_size; ++i) {
         ScalarT sum = 0;
 #pragma omp simd reduction(+ : sum)
-        for (std::size_t j = 0; j < block_size; ++j) sum += data[k * block_size + j] * W.data[j * block_size + i];
+        for (std::size_t j = 0; j < block_size; ++j) sum += data_[k * block_size + j] * W.data_[j * block_size + i];
         tmp[i] = sum;
       }
 
 #pragma omp simd
-      for (std::size_t i = 0; i < block_size; ++i) other.data[k * block_size + i] += tmp[i];
+      for (std::size_t i = 0; i < block_size; ++i) other.data_[k * block_size + i] += tmp[i];
     }
   }
 
@@ -65,17 +65,17 @@ public:
   {
     other.set_zero();
 #pragma omp parallel for
-    for (std::size_t k = 0; k < n; ++k) {
+    for (std::size_t k = 0; k < n_; ++k) {
       alignas(64) std::array<ScalarT, block_size> tmp{};
       for (std::size_t i = 0; i < block_size; ++i) {
         ScalarT sum = 0;
 #pragma omp simd reduction(+ : sum)
-        for (std::size_t j = 0; j < block_size; ++j) sum += data[k * block_size + j] * W.data[j * block_size + i];
+        for (std::size_t j = 0; j < block_size; ++j) sum += data_[k * block_size + j] * W.data_[j * block_size + i];
         tmp[i] = sum;
       }
 
 #pragma omp simd
-      for (std::size_t i = 0; i < block_size; ++i) other.data[k * block_size + i] = tmp[i];
+      for (std::size_t i = 0; i < block_size; ++i) other.data_[k * block_size + i] = tmp[i];
     }
   }
 
@@ -83,17 +83,17 @@ public:
   {
     other.set_zero();
 #pragma omp parallel for
-    for (std::size_t k = 0; k < n; ++k) {
+    for (std::size_t k = 0; k < n_; ++k) {
       alignas(64) std::array<ScalarT, block_size> tmp{};
       for (std::size_t i = 0; i < block_size; ++i) {
         ScalarT sum = 0;
 #pragma omp simd reduction(+ : sum)
-        for (std::size_t j = 0; j < block_size; ++j) sum += data[k * block_size + j] * W.data[i * block_size + j];
+        for (std::size_t j = 0; j < block_size; ++j) sum += data_[k * block_size + j] * W.data_[i * block_size + j];
         tmp[i] = sum;
       }
 
 #pragma omp simd
-      for (std::size_t i = 0; i < block_size; ++i) other.data[k * block_size + i] = tmp[i];
+      for (std::size_t i = 0; i < block_size; ++i) other.data_[k * block_size + i] = tmp[i];
     }
   }
 
@@ -105,26 +105,26 @@ public:
     {
       alignas(64) std::array<ScalarT, block_size * block_size> R_temp{};
 #pragma omp for
-      for (std::size_t k = 0; k < n - 3; k += 4) {
+      for (std::size_t k = 0; k < n_ - 3; k += 4) {
         for (std::size_t i = 0; i < block_size; ++i)
 #pragma omp simd
           for (std::size_t j = 0; j < block_size; ++j) {
-            R_temp[i * block_size + j] += data[(k + 0) * block_size + i] * other.data[(k + 0) * block_size + j] + data[(k + 1) * block_size + i] * other.data[(k + 1) * block_size + j] +
-                                          data[(k + 2) * block_size + i] * other.data[(k + 2) * block_size + j] + data[(k + 3) * block_size + i] * other.data[(k + 3) * block_size + j];
+            R_temp[i * block_size + j] += data_[(k + 0) * block_size + i] * other.data_[(k + 0) * block_size + j] + data_[(k + 1) * block_size + i] * other.data_[(k + 1) * block_size + j] +
+                                          data_[(k + 2) * block_size + i] * other.data_[(k + 2) * block_size + j] + data_[(k + 3) * block_size + i] * other.data_[(k + 3) * block_size + j];
           }
       }
 
 #pragma omp critical
       {
-        for (std::size_t i = 0; i < block_size * block_size; ++i) R.data[i] += R_temp[i];
+        for (std::size_t i = 0; i < block_size * block_size; ++i) R.data_[i] += R_temp[i];
       }
     }
 
     // Sequential epilogue for remaining rows
-    for (std::size_t k = (n / 4) * 4; k < n; ++k) {
+    for (std::size_t k = (n_ / 4) * 4; k < n_; ++k) {
       for (std::size_t i = 0; i < block_size; ++i)
 #pragma omp simd
-        for (std::size_t j = 0; j < block_size; ++j) R.data[i * block_size + j] += data[k * block_size + i] * other.data[k * block_size + j];
+        for (std::size_t j = 0; j < block_size; ++j) R.data_[i * block_size + j] += data_[k * block_size + i] * other.data_[k * block_size + j];
     }
   }
 
@@ -132,19 +132,19 @@ public:
   {
     // this -= other * R
 #pragma omp parallel for
-    for (std::size_t k = 0; k < n; ++k) {
+    for (std::size_t k = 0; k < n_; ++k) {
       for (std::size_t i = 0; i < block_size; ++i) {
         ScalarT sum = 0;
 #pragma omp simd reduction(+ : sum)
-        for (std::size_t j = 0; j < block_size; ++j) sum += other.data[k * block_size + j] * R.data[j * block_size + i];
-        data[k * block_size + i] -= sum;
+        for (std::size_t j = 0; j < block_size; ++j) sum += other.data_[k * block_size + j] * R.data_[j * block_size + i];
+        data_[k * block_size + i] -= sum;
       }
     }
   }
 
-  ScalarT* data;
+  ScalarT* data_;
 
 private:
-  std::size_t n;
+  std::size_t n_;
 };
 } // namespace trl::openmp

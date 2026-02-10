@@ -37,8 +37,8 @@ public:
   {
     constexpr auto storage = bs == 1 ? Eigen::ColMajor : Eigen::RowMajor;
 
-    Eigen::Map<Eigen::Matrix<T, Eigen::Dynamic, bs, storage>> Xmap(X.data, A.rows(), bs);
-    Eigen::Map<Eigen::Matrix<T, Eigen::Dynamic, bs, storage>> Ymap(Y.data, A.rows(), bs);
+    Eigen::Map<Eigen::Matrix<T, Eigen::Dynamic, bs, storage>> Xmap(X.data_, A.rows(), bs);
+    Eigen::Map<Eigen::Matrix<T, Eigen::Dynamic, bs, storage>> Ymap(Y.data_, A.rows(), bs);
 
     Ymap = A.template selfadjointView<Eigen::Lower>() * Xmap;
   }
@@ -79,8 +79,8 @@ public:
 
   void apply(typename Base::BlockView X, typename Base::BlockView Y) override
   {
-    Eigen::Map<Eigen::Matrix<T, Eigen::Dynamic, bs, storage>> Xmap(X.data, B.rows(), bs);
-    Eigen::Map<Eigen::Matrix<T, Eigen::Dynamic, bs, storage>> Ymap(Y.data, B.rows(), bs);
+    Eigen::Map<Eigen::Matrix<T, Eigen::Dynamic, bs, storage>> Xmap(X.data_, B.rows(), bs);
+    Eigen::Map<Eigen::Matrix<T, Eigen::Dynamic, bs, storage>> Ymap(Y.data_, B.rows(), bs);
 
     tmp = B.template selfadjointView<Eigen::Lower>() * Xmap;
     Ymap = solver.solve(tmp);
@@ -88,7 +88,7 @@ public:
 
   void dot(typename Base::BlockView V, typename Base::BlockView W, typename Base::BlockMatrixBlockView R) override
   {
-    Eigen::Map<Eigen::Matrix<T, Eigen::Dynamic, bs, storage>> Wmap(W.data, B.rows(), bs);
+    Eigen::Map<Eigen::Matrix<T, Eigen::Dynamic, bs, storage>> Wmap(W.data_, B.rows(), bs);
 
     tmp = B.template selfadjointView<Eigen::Lower>() * Wmap;
 
