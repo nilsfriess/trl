@@ -196,7 +196,7 @@ public:
 
   /** @brief Get the initial block V_0 for initialization
    *
-   *  The user must initialize this block before calling extend(0, m).
+   *  The user must initialize this block before calling solve().
    */
   auto initial_block() { return V.block_view(0); }
 

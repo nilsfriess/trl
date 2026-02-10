@@ -13,6 +13,14 @@ inline constexpr std::size_t to_linear_index(std::size_t cols, std::size_t i, st
 
 namespace trl::sycl {
 // TODO: cols_ should be an unsigned int
+/** @brief SYCL block view backed by USM shared memory.
+ *
+ *  Backend specifics:
+ *  - Uses a ::sycl::queue for all operations; kernels are enqueued on that queue.
+ *  - Assumes an in-order queue for correctness of dependent operations.
+ *    If an out-of-order queue is used, explicit events are required.
+ *  - Methods typically do not wait; synchronization is deferred to the caller.
+ */
 template <class T, std::size_t cols_>
 class BlockView {
   static constexpr size_t local_size = 128;
@@ -26,8 +34,7 @@ public:
       , q(queue)
       , rows_(rows)
   {
-    // TODO: We implicitly assume that an in-order queue is used, we should check this and throw an error if it's not.
-    //       Or use events you express dependencies.
+    // Assumes an in-order queue for implicit dependency ordering.
 
     // Query once at startup
     size_t num_cu = q->get_device().get_info<::sycl::info::device::max_compute_units>();
@@ -52,11 +59,6 @@ public:
   std::size_t rows() const { return rows_; }
   std::size_t cols() const { return cols_; }
 
-  /** @brief Copy data from another block view
-   *
-   *  Copies the data from source into this view. Both views must have
-   *  the same dimensions.
-   */
   void copy_from(const BlockView& source)
   {
     assert(rows_ == source.rows_);

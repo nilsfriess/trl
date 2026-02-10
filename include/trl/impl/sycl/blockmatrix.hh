@@ -10,6 +10,14 @@
 #include "matrixblockview.hh"
 
 namespace trl::sycl {
+/** @brief SYCL block matrix backed by USM shared memory.
+ *
+ *  Backend specifics:
+ *  - Allocates USM shared memory on construction.
+ *  - Stores a ::sycl::queue by value and uses it for memcpy/memset.
+ *  - Copy operations perform explicit device copies and wait for completion.
+ *  - print() waits on the queue before reading data on the host.
+ */
 template <class T, unsigned int bs>
 class BlockMatrix {
 public:

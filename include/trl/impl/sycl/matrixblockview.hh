@@ -7,6 +7,13 @@
 #include <sycl/sycl.hpp>
 
 namespace trl::sycl {
+/** @brief SYCL matrix block view backed by USM shared memory.
+ *
+ *  Backend specifics:
+ *  - Holds a queue pointer used for memcpy/memset and synchronization.
+ *  - Methods that read/write on the host call queue->wait().
+ *  - Assumes an in-order queue for implicit dependency ordering.
+ */
 template <class T, unsigned int bs>
 class MatrixBlockView {
 public:
@@ -31,18 +38,8 @@ public:
   // Default destructor (view doesn't own data)
   ~MatrixBlockView() = default;
 
-  /** @brief Copy data from another matrix block view
-   *
-   *  Copies the data from source into this view. Both views must have
-   *  the same dimensions (bs × bs).
-   */
   void copy_from(const MatrixBlockView& source) { queue->memcpy(data, source.data, bs * bs * sizeof(T)); }
 
-  /** @brief Copy and transpose data from another matrix block view
-   *
-   *  Copies the transposed data from source into this view.
-   *  This[i,j] = source[j,i] for all i,j.
-   */
   void copy_from_transpose(const MatrixBlockView& source)
   {
     queue->wait();
@@ -52,33 +49,15 @@ public:
       for (std::size_t j = 0; j < bs; ++j) dest_ptr[i * bs + j] = src_ptr[j * bs + i];
   }
 
-  /** @brief Set all elements of the block to zero */
   void set_zero() { queue->memset(data, 0, bs * bs * sizeof(T)); }
 
-  /** @brief Set the diagonal elements of the block
-   *
-   *  Sets diagonal elements data[i,i] = values[i] for i in [0, bs).
-   *  Off-diagonal elements are unchanged.
-   *
-   *  @param values Vector of size bs containing the diagonal values
-   */
-  void set_diagonal(std::span<T, bs> values)
+  void set_diagonal(std::span<T> values)
   {
     queue->wait();
     T* dest_ptr = data;
     for (std::size_t i = 0; i < bs; ++i) dest_ptr[i * bs + i] = values[i];
   }
 
-  /** @brief Multiply this block matrix by a small vector
-   *
-   *  Computes result = this * vec, where:
-   *  - this is a bs × bs matrix
-   *  - vec is a vector of size bs
-   *  - result is a vector of size bs
-   *
-   *  @param vec Input vector of size bs
-   *  @param result Output vector of size bs (will be overwritten)
-   */
   void mult(const std::vector<T>& vec, std::vector<T>& result) const { assert(false && "not implemented"); }
 
   void mult(MatrixBlockView B, MatrixBlockView C)
@@ -94,15 +73,6 @@ public:
     }
   }
 
-  /** @brief Element access operator for reading/writing matrix elements
-   *
-   *  Provides direct access to matrix element at (row, col).
-   *  Note: This requires synchronization if used on device memory.
-   *
-   *  @param row Row index (0-based)
-   *  @param col Column index (0-based)
-   *  @return Reference to the element at (row, col)
-   */
   T& operator()(std::size_t row, std::size_t col)
   {
     assert(row < bs);

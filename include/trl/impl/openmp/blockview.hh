@@ -8,15 +8,31 @@
 #include <cstddef>
 
 namespace trl::openmp {
+  /** @brief OpenMP block view backed by aligned host memory.
+   *
+   *  Backend specifics:
+   *  - Data is stored in row-major order with 64-byte alignment.
+   *  - Operations use OpenMP parallel loops and SIMD pragmas.
+   *  - The view is lightweight (std::span-like); copying the view is cheap
+   *    but does not copy the underlying data.
+   *  - dot() uses thread-local buffers combined in a critical section.
+   */
 template <class ScalarT, unsigned int block_size>
 class BlockView {
 public:
   using EntryType = ScalarT;
   using MatrixBlockView = typename BlockMatrix<ScalarT, block_size>::BlockView;
 
+  /** @brief Sets all entries to zero.
+   *
+   *  Computes \f$ X_{ij} = 0 \f$ for all \f$ i, j \f$.
+   */
   void set_zero() { std::fill_n(data_, n_ * block_size, 0); }
 
+  /** @brief Returns the number of rows in the block. */
   std::size_t rows() const { return n_; }
+
+  /** @brief Returns the block size (number of columns). */
   constexpr std::size_t cols() const { return block_size; }
 
   BlockView(ScalarT* data, std::size_t n)
@@ -30,12 +46,20 @@ public:
   BlockView(BlockView&&) = default;
   BlockView& operator=(BlockView&&) = default;
 
+  /** @brief Copies data from another block view.
+   *
+   *  Computes the element-wise assignment \f$ X = Y \f$.
+   */
   void copy_from(BlockView other)
   {
 #pragma omp parallel for
     for (std::size_t i = 0; i < n_ * block_size; ++i) data_[i] = other.data_[i];
   }
 
+  /** @brief Subtracts another block view element-wise.
+   *
+   *  Computes \f$ X = X - Y \f$ where X is this block view.
+   */
   BlockView& operator-=(BlockView other)
   {
 #pragma omp parallel for
@@ -43,6 +67,11 @@ public:
     return *this;
   }
 
+  /** @brief Computes matrix-block product and adds to result.
+   *
+   *  Computes \f$ Y = Y + X W \f$ where X is this block view,
+   *  W is a small square block matrix, and Y is the output.
+   */
   void mult_add(MatrixBlockView W, BlockView other)
   {
     // other += this * W
@@ -61,6 +90,11 @@ public:
     }
   }
 
+  /** @brief Computes matrix-block product.
+   *
+   *  Computes \f$ Y = X W \f$ where X is this block view
+   *  and W is a small square block matrix.
+   */
   void mult(MatrixBlockView W, BlockView other)
   {
     other.set_zero();
@@ -79,6 +113,11 @@ public:
     }
   }
 
+  /** @brief Computes matrix-block product with transposed block matrix.
+   *
+   *  Computes \f$ Y = X W^T \f$ where X is this block view
+   *  and \f$ W^T \f$ is the transpose of the block matrix.
+   */
   void mult_transpose(MatrixBlockView W, BlockView other)
   {
     other.set_zero();
@@ -97,6 +136,15 @@ public:
     }
   }
 
+  /** @brief Computes block inner product.
+   *
+   *  Computes \f$ R = X^T Y \f$ where X is this block view,
+   *  Y is the other block view, and R is a small square block matrix.
+   *
+   *  @par Implementation:
+   *  Uses thread-local buffers to accumulate partial results, which are
+   *  combined in a critical section to avoid race conditions.
+   */
   void dot(BlockView other, MatrixBlockView R)
   {
     R.set_zero();
@@ -128,6 +176,11 @@ public:
     }
   }
 
+  /** @brief Subtracts a matrix-block product from this block view.
+   *
+   *  Computes \f$ X = X - Y R \f$ where X is this block view,
+   *  Y is another block view, and R is a small square block matrix.
+   */
   void subtract_product(BlockView other, MatrixBlockView R)
   {
     // this -= other * R

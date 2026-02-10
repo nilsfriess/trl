@@ -9,6 +9,13 @@
 #include <cstdlib>
 
 namespace trl::openmp {
+/** @brief OpenMP block matrix backed by aligned host memory.
+ *
+ *  Backend specifics:
+ *  - Allocates 64-byte aligned memory using std::aligned_alloc.
+ *  - Zero-initialized on construction.
+ *  - Not copyable or movable.
+ */
 template <class ScalarT, unsigned int block_size>
 class BlockMatrix {
 public:
@@ -32,9 +39,16 @@ public:
 
   ~BlockMatrix() { std::free(data); }
 
+  /** @brief Returns the number of block rows. */
   std::size_t block_rows() const { return block_rows_; }
+
+  /** @brief Returns the number of block columns. */
   std::size_t block_cols() const { return block_cols_; }
 
+  /** @brief Returns a view of the block at position (block_row, block_col).
+   *
+   *  The returned view is a lightweight object that does not own the data.
+   */
   BlockView block_view(std::size_t block_row, std::size_t block_col) const
   {
     assert(block_row < block_rows_);
