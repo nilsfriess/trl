@@ -18,7 +18,7 @@ public:
   using Scalar = ScalarT;
   constexpr static auto blocksize = block_size;
 
-  using BlockMultivector = BlockMultivector<Scalar, blocksize>;
+  using BlockMultivector = ::trl::openmp::BlockMultivector<Scalar, blocksize>;
   using BlockView = typename BlockMultivector::BlockView;
   using BlockMatrix = typename BlockMultivector::BlockMatrix;
   using BlockMatrixBlockView = BlockMatrix::BlockView;

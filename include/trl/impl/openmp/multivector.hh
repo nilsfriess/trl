@@ -21,8 +21,8 @@ template <class ScalarT, unsigned int block_size>
 class BlockMultivector {
 public:
   using Scalar = ScalarT;
-  using BlockView = BlockView<ScalarT, block_size>;
-  using BlockMatrix = BlockMatrix<ScalarT, block_size>;
+  using BlockView = ::trl::openmp::BlockView<ScalarT, block_size>;
+  using BlockMatrix = ::trl::openmp::BlockMatrix<ScalarT, block_size>;
   using MatrixBlockView = typename BlockMatrix::BlockView;
 
   static constexpr auto blocksize = block_size;
