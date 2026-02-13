@@ -20,6 +20,7 @@ namespace trl::openmp {
 template <class ScalarT, unsigned int block_size>
 class BlockView {
 public:
+  constexpr static auto blocksize = block_size;
   using EntryType = ScalarT;
   using MatrixBlockView = typename BlockMatrix<ScalarT, block_size>::BlockView;
 
