@@ -1,14 +1,11 @@
 #pragma once
 
 #include "../concepts.hh"
-#include "trl/eigensolvers/params.hh"
+#include "params.hh"
 
 #include <algorithm>
 #include <cassert>
 #include <cmath>
-#include <iomanip>
-#include <iostream>
-#include <limits>
 #include <memory>
 
 namespace trl {
@@ -291,10 +288,10 @@ private:
   std::shared_ptr<EVP> evp;
 
   // Parameters
-  const unsigned int nev;
-  const unsigned int ncv;
-  const unsigned int max_restarts;
-  const Scalar tolerance = 1e-8; // Default tolerance for convergence
+  unsigned int nev;
+  unsigned int ncv;
+  unsigned int max_restarts;
+  Scalar tolerance = 1e-8; // Default tolerance for convergence
 
   // Convergence tracking
   unsigned int nconv = 0;        // Number of converged blocks
