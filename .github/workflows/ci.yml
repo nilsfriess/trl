@@ -26,7 +26,7 @@ jobs:
         cd AdaptiveCpp
         mkdir build
         cd build
-        cmake .. -DCMAKE_INSTALL_PREFIX=${GITHUB_WORKSPACE}/acpp_install -DWITH_OPENCL_BACKEND=Off
+        cmake .. -DCMAKE_INSTALL_PREFIX=${GITHUB_WORKSPACE}/acpp_install -DWITH_OPENCL_BACKEND=Off -DLLVM_DIR=/usr/lib/llvm-18/cmake
         make -j install
 
     - name: Configure CMake
