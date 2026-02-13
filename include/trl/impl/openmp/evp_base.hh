@@ -3,10 +3,10 @@
 #include "multivector.hh"
 
 #include <Eigen/Dense>
-
 #include <cmath>
 #include <limits>
 #include <memory>
+#include <numeric>
 #include <optional>
 #include <span>
 #include <vector>
@@ -38,28 +38,36 @@ public:
 
   virtual void orthonormalize(BlockView V, BlockMatrixBlockView R)
   {
-    // 1. Compute Gram matrix G = V^T * V (stored in R)
-    this->dot(V, V, R);
+    if constexpr (blocksize == 1) {
+      this->dot(V, V, R);
+      ScalarT norm = std::sqrt(R.data_[0]);
+      for (std::size_t i = 0; i < N; ++i) V.data_[i] /= norm;
+      R.data_[0] = norm;
+    }
+    else {
+      // 1. Compute Gram matrix G = V^T * V (stored in R)
+      this->dot(V, V, R);
 
-    // 2. ComputN Cholesky factorisation of Gram matrix
-    // G = U^T * U where U is upper triangular
-    Eigen::Map<Eigen::Matrix<ScalarT, blocksize, blocksize, Eigen::RowMajor>> RR(R.data_);
-    Eigen::LLT<Eigen::Matrix<ScalarT, Eigen::Dynamic, Eigen::Dynamic>> llt(RR);
-    if (llt.info() != Eigen::Success) throw std::runtime_error("Cholesky factorization failed in orthonormalize");
-    RR = llt.matrixL().transpose();
-    auto stored_R = RR.eval(); // Force evaluation into a separate matrix
+      // 2. Compute Cholesky factorisation of Gram matrix
+      // G = U^T * U where U is upper triangular
+      Eigen::Map<Eigen::Matrix<ScalarT, blocksize, blocksize, Eigen::RowMajor>> RR(R.data_);
+      Eigen::LLT<Eigen::Matrix<ScalarT, Eigen::Dynamic, Eigen::Dynamic>> llt(RR);
+      if (llt.info() != Eigen::Success) throw std::runtime_error("Cholesky factorization failed in orthonormalize");
+      RR = llt.matrixL().transpose();
+      auto stored_R = RR.eval(); // Force evaluation into a separate matrix
 
-    // 3. Compute U^{-1} and store in R temporarily
-    RR = stored_R.inverse().eval(); // R now contains U^{-1}
+      // 3. Compute U^{-1} and store in R temporarily
+      RR = stored_R.inverse().eval(); // R now contains U^{-1}
 
-    // 4. Compute V_new = V_old * U^{-1} using temporary to avoid aliasing
-    auto Vtemp0 = Vtemp->block_view(0);
-    V.mult(R, Vtemp0);   // Vtemp = V * U^{-1}
-    V.copy_from(Vtemp0); // V = Vtemp
+      // 4. Compute V_new = V_old * U^{-1} using temporary to avoid aliasing
+      auto Vtemp0 = Vtemp->block_view(0);
+      V.mult(R, Vtemp0);   // Vtemp = V * U^{-1}
+      V.copy_from(Vtemp0); // V = Vtemp
 
-    // 5. Restore U in R (the Cholesky factor, not its inverse)
-    // The Lanczos algorithm needs R such that V_old = V_new * R
-    RR = stored_R;
+      // 5. Restore U in R (the Cholesky factor, not its inverse)
+      // The Lanczos algorithm needs R such that V_old = V_new * R
+      RR = stored_R;
+    }
   }
 
   std::size_t size() const { return N; }
@@ -89,8 +97,13 @@ public:
 
     // Store eigenvalues in descending order (largest first)
     // Eigen returns them in ascending order, so reverse
+    std::vector<unsigned int> indices(n_total);
+    std::iota(indices.begin(), indices.end(), 0);
+
+    std::sort(indices.begin(), indices.end(), [&](const auto& i, const auto& j) { return std::abs(solver.eigenvalues()[i]) > std::abs(solver.eigenvalues()[j]); });
+
     eigenvalues.resize(n_total);
-    for (std::size_t i = 0; i < n_total; ++i) eigenvalues[i] = solver.eigenvalues()(n_total - 1 - i);
+    for (std::size_t i = 0; i < n_total; ++i) eigenvalues[i] = solver.eigenvalues()(indices[i]);
 
     // Store eigenvectors in BlockMatrix format (also reversed to match eigenvalues)
     if (!eigenvectors) eigenvectors = std::make_unique<BlockMatrix>(B.block_rows(), B.block_cols());
@@ -101,7 +114,7 @@ public:
         for (unsigned int bi = 0; bi < blocksize; ++bi) {
           for (unsigned int bj = 0; bj < blocksize; ++bj) {
             // Reverse column order to match descending eigenvalue order
-            block.data_[bi * blocksize + bj] = solver.eigenvectors()(i * blocksize + bi, n_total - 1 - (j * blocksize + bj));
+            block.data_[bi * blocksize + bj] = solver.eigenvectors()(i * blocksize + bi, indices[j * blocksize + bj]);
           }
         }
       }
