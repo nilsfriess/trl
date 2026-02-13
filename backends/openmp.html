@@ -1,0 +1,382 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="../">
+<head>
+  <meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>OpenMP Backend &mdash; trl 0.1 documentation</title>
+      <link rel="stylesheet" type="text/css" href="../_static/pygments.css?v=80d5e7a1" />
+      <link rel="stylesheet" type="text/css" href="../_static/css/theme.css?v=9edc463e" />
+
+  
+      <script src="../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../_static/documentation_options.js?v=2709fde1"></script>
+      <script src="../_static/doctools.js?v=fd6eb6e6"></script>
+      <script src="../_static/sphinx_highlight.js?v=6ffebe34"></script>
+      <script defer="defer" src="https://cdn.jsdelivr.net/npm/mathjax@4/tex-mml-chtml.js"></script>
+    <script src="../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="SYCL Backend" href="sycl.html" />
+    <link rel="prev" title="trl - Thick Restart (Block) Lanczos" href="../index.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="../index.html" class="icon icon-home">
+            trl
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">Backends:</span></p>
+<ul class="current">
+<li class="toctree-l1 current"><a class="current reference internal" href="#">OpenMP Backend</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="#api-reference">API Reference</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="#_CPPv4I0_jEN3trl6openmp16BlockMultivectorE"><code class="docutils literal notranslate"><span class="pre">trl::openmp::BlockMultivector</span></code></a><ul>
+<li class="toctree-l4"><a class="reference internal" href="#_CPPv4N3trl6openmp16BlockMultivector16BlockMultivectorENSt6size_tEj"><code class="docutils literal notranslate"><span class="pre">BlockMultivector()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#_CPPv4NK3trl6openmp16BlockMultivector10block_viewENSt6size_tE"><code class="docutils literal notranslate"><span class="pre">block_view()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#_CPPv4NK3trl6openmp16BlockMultivector6blocksEv"><code class="docutils literal notranslate"><span class="pre">blocks()</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="#_CPPv4I0_jEN3trl6openmp9BlockViewE"><code class="docutils literal notranslate"><span class="pre">trl::openmp::BlockView</span></code></a><ul>
+<li class="toctree-l4"><a class="reference internal" href="#_CPPv4N3trl6openmp9BlockView8set_zeroEv"><code class="docutils literal notranslate"><span class="pre">set_zero()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#_CPPv4NK3trl6openmp9BlockView4rowsEv"><code class="docutils literal notranslate"><span class="pre">rows()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#_CPPv4NK3trl6openmp9BlockView4colsEv"><code class="docutils literal notranslate"><span class="pre">cols()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#_CPPv4N3trl6openmp9BlockView9copy_fromE9BlockView"><code class="docutils literal notranslate"><span class="pre">copy_from()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#_CPPv4N3trl6openmp9BlockViewmIE9BlockView"><code class="docutils literal notranslate"><span class="pre">operator-=()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#_CPPv4N3trl6openmp9BlockView8mult_addE15MatrixBlockView9BlockView"><code class="docutils literal notranslate"><span class="pre">mult_add()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#_CPPv4N3trl6openmp9BlockView4multE15MatrixBlockView9BlockView"><code class="docutils literal notranslate"><span class="pre">mult()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#_CPPv4N3trl6openmp9BlockView14mult_transposeE15MatrixBlockView9BlockView"><code class="docutils literal notranslate"><span class="pre">mult_transpose()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#_CPPv4N3trl6openmp9BlockView3dotE9BlockView15MatrixBlockView"><code class="docutils literal notranslate"><span class="pre">dot()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#_CPPv4N3trl6openmp9BlockView16subtract_productE9BlockView15MatrixBlockView"><code class="docutils literal notranslate"><span class="pre">subtract_product()</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="#_CPPv4I0_jEN3trl6openmp11BlockMatrixE"><code class="docutils literal notranslate"><span class="pre">trl::openmp::BlockMatrix</span></code></a><ul>
+<li class="toctree-l4"><a class="reference internal" href="#_CPPv4NK3trl6openmp11BlockMatrix10block_rowsEv"><code class="docutils literal notranslate"><span class="pre">block_rows()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#_CPPv4NK3trl6openmp11BlockMatrix10block_colsEv"><code class="docutils literal notranslate"><span class="pre">block_cols()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#_CPPv4NK3trl6openmp11BlockMatrix10block_viewENSt6size_tENSt6size_tE"><code class="docutils literal notranslate"><span class="pre">block_view()</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="#_CPPv4I0_jEN3trl6openmp20BlockMatrixBlockViewE"><code class="docutils literal notranslate"><span class="pre">trl::openmp::BlockMatrixBlockView</span></code></a><ul>
+<li class="toctree-l4"><a class="reference internal" href="#_CPPv4N3trl6openmp20BlockMatrixBlockView9copy_fromE20BlockMatrixBlockView"><code class="docutils literal notranslate"><span class="pre">copy_from()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#_CPPv4N3trl6openmp20BlockMatrixBlockView19copy_from_transposeE20BlockMatrixBlockView"><code class="docutils literal notranslate"><span class="pre">copy_from_transpose()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#_CPPv4N3trl6openmp20BlockMatrixBlockView8set_zeroEv"><code class="docutils literal notranslate"><span class="pre">set_zero()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#_CPPv4N3trl6openmp20BlockMatrixBlockView4multE20BlockMatrixBlockView20BlockMatrixBlockView"><code class="docutils literal notranslate"><span class="pre">mult()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#_CPPv4N3trl6openmp20BlockMatrixBlockView12set_diagonalENSt4spanI7ScalarTEE"><code class="docutils literal notranslate"><span class="pre">set_diagonal()</span></code></a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="sycl.html">SYCL Backend</a></li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">C++ 20 Concepts</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../concepts/index.html">Overview of the concepts</a></li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">Algorithms:</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../algorithms/lanczos.html">Lanczos Method</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../index.html">trl</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../index.html" class="icon icon-home" aria-label="Home"></a></li>
+      <li class="breadcrumb-item active">OpenMP Backend</li>
+      <li class="wy-breadcrumbs-aside">
+            <a href="../_sources/backends/openmp.rst.txt" rel="nofollow"> View page source</a>
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <section id="openmp-backend">
+<h1>OpenMP Backend<a class="headerlink" href="#openmp-backend" title="Link to this heading"></a></h1>
+<p>The OpenMP backend provides CPU-based parallel computation using OpenMP.
+It is the default backend and always available.</p>
+<section id="api-reference">
+<h2>API Reference<a class="headerlink" href="#api-reference" title="Link to this heading"></a></h2>
+<p>Like every backend, the OpenMP backend implements classes representing block multivectors and block matrices and views of individual blocks for these types.</p>
+<dl class="cpp class">
+<dt class="sig sig-object cpp" id="_CPPv4I0_jEN3trl6openmp16BlockMultivectorE">
+<span id="_CPPv3I0_jEN3trl6openmp16BlockMultivectorE"></span><span id="_CPPv2I0_jEN3trl6openmp16BlockMultivectorE"></span><span class="k"><span class="pre">template</span></span><span class="p"><span class="pre">&lt;</span></span><span class="k"><span class="pre">class</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">ScalarT</span></span></span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="kt"><span class="pre">unsigned</span></span><span class="w"> </span><span class="kt"><span class="pre">int</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">block_size</span></span></span><span class="p"><span class="pre">&gt;</span></span><br /><span class="target" id="classtrl_1_1openmp_1_1BlockMultivector"></span><span class="k"><span class="pre">class</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">BlockMultivector</span></span></span><a class="headerlink" href="#_CPPv4I0_jEN3trl6openmp16BlockMultivectorE" title="Link to this definition"></a><br /></dt>
+<dd><p>OpenMP multivector backed by aligned host memory. </p>
+<p>Backend specifics:<ul class="simple">
+<li><p>Allocates 64-byte aligned memory using std::aligned_alloc.</p></li>
+<li><p>Blocks are stored contiguously in row-major order.</p></li>
+<li><p>Zero-initialized on construction.</p></li>
+<li><p>Not copyable, only movable. </p></li>
+</ul>
+</p>
+<div class="breathe-sectiondef docutils container">
+<p class="breathe-sectiondef-title rubric" id="breathe-section-title-public-functions">Public Functions</p>
+<dl class="cpp function">
+<dt class="sig sig-object cpp" id="_CPPv4N3trl6openmp16BlockMultivector16BlockMultivectorENSt6size_tEj">
+<span id="_CPPv3N3trl6openmp16BlockMultivector16BlockMultivectorENSt6size_tEj"></span><span id="_CPPv2N3trl6openmp16BlockMultivector16BlockMultivectorENSt6size_tEj"></span><span id="trl::openmp::BlockMultivector::BlockMultivector__std::s.unsigned-i"></span><span class="target" id="classtrl_1_1openmp_1_1BlockMultivector_1a9bb68156f3de4e08e4fe59786a261f7e"></span><span class="k"><span class="pre">inline</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">BlockMultivector</span></span></span><span class="sig-paren">(</span><span class="n"><span class="pre">std</span></span><span class="p"><span class="pre">::</span></span><span class="n"><span class="pre">size_t</span></span><span class="w"> </span><span class="n sig-param"><span class="pre">rows</span></span>, <span class="kt"><span class="pre">unsigned</span></span><span class="w"> </span><span class="kt"><span class="pre">int</span></span><span class="w"> </span><span class="n sig-param"><span class="pre">cols</span></span><span class="sig-paren">)</span><a class="headerlink" href="#_CPPv4N3trl6openmp16BlockMultivector16BlockMultivectorENSt6size_tEj" title="Link to this definition"></a><br /></dt>
+<dd><p>Allocates a block multivector of the given size. </p>
+<p>Allocates memory aligned to 64 bytes. If rows * cols is not a multiple of alignment, the next larger multiple is used as the allocation size (this is a requirement of std::aligned_alloc). The aligned memory is zero-initialised.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Throws<span class="colon">:</span></dt>
+<dd class="field-odd"><p><span><span class="cpp-expr sig sig-inline cpp"><span class="n">std</span><span class="p">::</span><span class="n">invalid_argument</span></span></span> – if <code class="docutils literal notranslate"><span class="pre">cols</span></code> is not divisible by blocksize. </p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="cpp function">
+<dt class="sig sig-object cpp" id="_CPPv4NK3trl6openmp16BlockMultivector10block_viewENSt6size_tE">
+<span id="_CPPv3NK3trl6openmp16BlockMultivector10block_viewENSt6size_tE"></span><span id="_CPPv2NK3trl6openmp16BlockMultivector10block_viewENSt6size_tE"></span><span id="trl::openmp::BlockMultivector::block_view__std::sC"></span><span class="target" id="classtrl_1_1openmp_1_1BlockMultivector_1a9ae3b7c2f2db150c30c1e3713931a4f6"></span><span class="k"><span class="pre">inline</span></span><span class="w"> </span><a class="reference internal" href="#_CPPv4I0_jEN3trl6openmp9BlockViewE" title="trl::openmp::BlockView"><span class="n"><span class="pre">BlockView</span></span></a><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">block_view</span></span></span><span class="sig-paren">(</span><span class="n"><span class="pre">std</span></span><span class="p"><span class="pre">::</span></span><span class="n"><span class="pre">size_t</span></span><span class="w"> </span><span class="n sig-param"><span class="pre">i</span></span><span class="sig-paren">)</span><span class="w"> </span><span class="k"><span class="pre">const</span></span><a class="headerlink" href="#_CPPv4NK3trl6openmp16BlockMultivector10block_viewENSt6size_tE" title="Link to this definition"></a><br /></dt>
+<dd><p>Returns a view of the i-th block. </p>
+<p>The returned view is a lightweight std::span-like object that does not own the data.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Throws<span class="colon">:</span></dt>
+<dd class="field-odd"><p><span><span class="cpp-expr sig sig-inline cpp"><span class="n">std</span><span class="p">::</span><span class="n">out_of_range</span></span></span> – if i is not a valid block index. </p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="cpp function">
+<dt class="sig sig-object cpp" id="_CPPv4NK3trl6openmp16BlockMultivector6blocksEv">
+<span id="_CPPv3NK3trl6openmp16BlockMultivector6blocksEv"></span><span id="_CPPv2NK3trl6openmp16BlockMultivector6blocksEv"></span><span id="trl::openmp::BlockMultivector::blocksC"></span><span class="target" id="classtrl_1_1openmp_1_1BlockMultivector_1af6aeabee580bec3841f178353a0b69e2"></span><span class="k"><span class="pre">inline</span></span><span class="w"> </span><span class="n"><span class="pre">std</span></span><span class="p"><span class="pre">::</span></span><span class="n"><span class="pre">size_t</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">blocks</span></span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><span class="w"> </span><span class="k"><span class="pre">const</span></span><a class="headerlink" href="#_CPPv4NK3trl6openmp16BlockMultivector6blocksEv" title="Link to this definition"></a><br /></dt>
+<dd><p>Returns the number of blocks in the multivector. </p>
+</dd></dl>
+
+</div>
+</dd></dl>
+
+<dl class="cpp class">
+<dt class="sig sig-object cpp" id="_CPPv4I0_jEN3trl6openmp9BlockViewE">
+<span id="_CPPv3I0_jEN3trl6openmp9BlockViewE"></span><span id="_CPPv2I0_jEN3trl6openmp9BlockViewE"></span><span class="k"><span class="pre">template</span></span><span class="p"><span class="pre">&lt;</span></span><span class="k"><span class="pre">class</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">ScalarT</span></span></span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="kt"><span class="pre">unsigned</span></span><span class="w"> </span><span class="kt"><span class="pre">int</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">block_size</span></span></span><span class="p"><span class="pre">&gt;</span></span><br /><span class="target" id="classtrl_1_1openmp_1_1BlockView"></span><span class="k"><span class="pre">class</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">BlockView</span></span></span><a class="headerlink" href="#_CPPv4I0_jEN3trl6openmp9BlockViewE" title="Link to this definition"></a><br /></dt>
+<dd><p>OpenMP block view backed by aligned host memory. </p>
+<p>Backend specifics:<ul class="simple">
+<li><p>Data is stored in row-major order with 64-byte alignment.</p></li>
+<li><p>Operations use OpenMP parallel loops and SIMD pragmas.</p></li>
+<li><p>The view is lightweight (std::span-like); copying the view is cheap but does not copy the underlying data.</p></li>
+<li><p><a class="reference internal" href="#classtrl_1_1openmp_1_1BlockView_1a01feee41830a8b0bb7696a13a840e608"><span class="std std-ref">dot()</span></a> uses thread-local buffers combined in a critical section. </p></li>
+</ul>
+</p>
+<div class="breathe-sectiondef docutils container">
+<p class="breathe-sectiondef-title rubric" id="breathe-section-title-public-functions">Public Functions</p>
+<dl class="cpp function">
+<dt class="sig sig-object cpp" id="_CPPv4N3trl6openmp9BlockView8set_zeroEv">
+<span id="_CPPv3N3trl6openmp9BlockView8set_zeroEv"></span><span id="_CPPv2N3trl6openmp9BlockView8set_zeroEv"></span><span id="trl::openmp::BlockView::set_zero"></span><span class="target" id="classtrl_1_1openmp_1_1BlockView_1ae59b977f1e07314aa56cf7add1e31813"></span><span class="k"><span class="pre">inline</span></span><span class="w"> </span><span class="kt"><span class="pre">void</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">set_zero</span></span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#_CPPv4N3trl6openmp9BlockView8set_zeroEv" title="Link to this definition"></a><br /></dt>
+<dd><p>Sets all entries to zero. </p>
+<p>Computes <span class="math notranslate nohighlight">\( X_{ij} = 0 \)</span> for all <span class="math notranslate nohighlight">\( i, j \)</span>. </p>
+</dd></dl>
+
+<dl class="cpp function">
+<dt class="sig sig-object cpp" id="_CPPv4NK3trl6openmp9BlockView4rowsEv">
+<span id="_CPPv3NK3trl6openmp9BlockView4rowsEv"></span><span id="_CPPv2NK3trl6openmp9BlockView4rowsEv"></span><span id="trl::openmp::BlockView::rowsC"></span><span class="target" id="classtrl_1_1openmp_1_1BlockView_1acd0622352aa5b54ca8461288bb5d8dfd"></span><span class="k"><span class="pre">inline</span></span><span class="w"> </span><span class="n"><span class="pre">std</span></span><span class="p"><span class="pre">::</span></span><span class="n"><span class="pre">size_t</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">rows</span></span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><span class="w"> </span><span class="k"><span class="pre">const</span></span><a class="headerlink" href="#_CPPv4NK3trl6openmp9BlockView4rowsEv" title="Link to this definition"></a><br /></dt>
+<dd><p>Returns the number of rows in the block. </p>
+</dd></dl>
+
+<dl class="cpp function">
+<dt class="sig sig-object cpp" id="_CPPv4NK3trl6openmp9BlockView4colsEv">
+<span id="_CPPv3NK3trl6openmp9BlockView4colsEv"></span><span id="_CPPv2NK3trl6openmp9BlockView4colsEv"></span><span id="trl::openmp::BlockView::colsCCE"></span><span class="target" id="classtrl_1_1openmp_1_1BlockView_1ad4599c09f2d8426a4a96c0d3484171bd"></span><span class="k"><span class="pre">inline</span></span><span class="w"> </span><span class="k"><span class="pre">constexpr</span></span><span class="w"> </span><span class="n"><span class="pre">std</span></span><span class="p"><span class="pre">::</span></span><span class="n"><span class="pre">size_t</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">cols</span></span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><span class="w"> </span><span class="k"><span class="pre">const</span></span><a class="headerlink" href="#_CPPv4NK3trl6openmp9BlockView4colsEv" title="Link to this definition"></a><br /></dt>
+<dd><p>Returns the block size (number of columns). </p>
+</dd></dl>
+
+<dl class="cpp function">
+<dt class="sig sig-object cpp" id="_CPPv4N3trl6openmp9BlockView9copy_fromE9BlockView">
+<span id="_CPPv3N3trl6openmp9BlockView9copy_fromE9BlockView"></span><span id="_CPPv2N3trl6openmp9BlockView9copy_fromE9BlockView"></span><span id="trl::openmp::BlockView::copy_from__BlockView"></span><span class="target" id="classtrl_1_1openmp_1_1BlockView_1a3eeeb9ff83b9d32d1f52105417242f86"></span><span class="k"><span class="pre">inline</span></span><span class="w"> </span><span class="kt"><span class="pre">void</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">copy_from</span></span></span><span class="sig-paren">(</span><a class="reference internal" href="#_CPPv4I0_jEN3trl6openmp9BlockViewE" title="trl::openmp::BlockView"><span class="n"><span class="pre">BlockView</span></span></a><span class="w"> </span><span class="n sig-param"><span class="pre">other</span></span><span class="sig-paren">)</span><a class="headerlink" href="#_CPPv4N3trl6openmp9BlockView9copy_fromE9BlockView" title="Link to this definition"></a><br /></dt>
+<dd><p>Copies data from another block view. </p>
+<p>Computes the element-wise assignment <span class="math notranslate nohighlight">\( X = Y \)</span>. </p>
+</dd></dl>
+
+<dl class="cpp function">
+<dt class="sig sig-object cpp" id="_CPPv4N3trl6openmp9BlockViewmIE9BlockView">
+<span id="_CPPv3N3trl6openmp9BlockViewmIE9BlockView"></span><span id="_CPPv2N3trl6openmp9BlockViewmIE9BlockView"></span><span id="trl::openmp::BlockView::sub-assign-operator__BlockView"></span><span class="target" id="classtrl_1_1openmp_1_1BlockView_1a601914d0c5005fd05b6e6799b1d7f9dd"></span><span class="k"><span class="pre">inline</span></span><span class="w"> </span><a class="reference internal" href="#_CPPv4I0_jEN3trl6openmp9BlockViewE" title="trl::openmp::BlockView"><span class="n"><span class="pre">BlockView</span></span></a><span class="w"> </span><span class="p"><span class="pre">&amp;</span></span><span class="sig-name descname"><span class="k"><span class="pre">operator</span></span><span class="o"><span class="pre">-=</span></span></span><span class="sig-paren">(</span><a class="reference internal" href="#_CPPv4I0_jEN3trl6openmp9BlockViewE" title="trl::openmp::BlockView"><span class="n"><span class="pre">BlockView</span></span></a><span class="w"> </span><span class="n sig-param"><span class="pre">other</span></span><span class="sig-paren">)</span><a class="headerlink" href="#_CPPv4N3trl6openmp9BlockViewmIE9BlockView" title="Link to this definition"></a><br /></dt>
+<dd><p>Subtracts another block view element-wise. </p>
+<p>Computes <span class="math notranslate nohighlight">\( X = X - Y \)</span> where X is this block view. </p>
+</dd></dl>
+
+<dl class="cpp function">
+<dt class="sig sig-object cpp" id="_CPPv4N3trl6openmp9BlockView8mult_addE15MatrixBlockView9BlockView">
+<span id="_CPPv3N3trl6openmp9BlockView8mult_addE15MatrixBlockView9BlockView"></span><span id="_CPPv2N3trl6openmp9BlockView8mult_addE15MatrixBlockView9BlockView"></span><span id="trl::openmp::BlockView::mult_add__MatrixBlockView.BlockView"></span><span class="target" id="classtrl_1_1openmp_1_1BlockView_1ae123590ce4c7c4e65adea14ba7f0dadf"></span><span class="k"><span class="pre">inline</span></span><span class="w"> </span><span class="kt"><span class="pre">void</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">mult_add</span></span></span><span class="sig-paren">(</span><span class="n"><span class="pre">MatrixBlockView</span></span><span class="w"> </span><span class="n sig-param"><span class="pre">W</span></span>, <a class="reference internal" href="#_CPPv4I0_jEN3trl6openmp9BlockViewE" title="trl::openmp::BlockView"><span class="n"><span class="pre">BlockView</span></span></a><span class="w"> </span><span class="n sig-param"><span class="pre">other</span></span><span class="sig-paren">)</span><a class="headerlink" href="#_CPPv4N3trl6openmp9BlockView8mult_addE15MatrixBlockView9BlockView" title="Link to this definition"></a><br /></dt>
+<dd><p>Computes matrix-block product and adds to result. </p>
+<p>Computes <span class="math notranslate nohighlight">\( Y = Y + X W \)</span> where X is this block view, W is a small square block matrix, and Y is the output. </p>
+</dd></dl>
+
+<dl class="cpp function">
+<dt class="sig sig-object cpp" id="_CPPv4N3trl6openmp9BlockView4multE15MatrixBlockView9BlockView">
+<span id="_CPPv3N3trl6openmp9BlockView4multE15MatrixBlockView9BlockView"></span><span id="_CPPv2N3trl6openmp9BlockView4multE15MatrixBlockView9BlockView"></span><span id="trl::openmp::BlockView::mult__MatrixBlockView.BlockView"></span><span class="target" id="classtrl_1_1openmp_1_1BlockView_1a8089363335cedda3df88fbe4262efd48"></span><span class="k"><span class="pre">inline</span></span><span class="w"> </span><span class="kt"><span class="pre">void</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">mult</span></span></span><span class="sig-paren">(</span><span class="n"><span class="pre">MatrixBlockView</span></span><span class="w"> </span><span class="n sig-param"><span class="pre">W</span></span>, <a class="reference internal" href="#_CPPv4I0_jEN3trl6openmp9BlockViewE" title="trl::openmp::BlockView"><span class="n"><span class="pre">BlockView</span></span></a><span class="w"> </span><span class="n sig-param"><span class="pre">other</span></span><span class="sig-paren">)</span><a class="headerlink" href="#_CPPv4N3trl6openmp9BlockView4multE15MatrixBlockView9BlockView" title="Link to this definition"></a><br /></dt>
+<dd><p>Computes matrix-block product. </p>
+<p>Computes <span class="math notranslate nohighlight">\( Y = X W \)</span> where X is this block view and W is a small square block matrix. </p>
+</dd></dl>
+
+<dl class="cpp function">
+<dt class="sig sig-object cpp" id="_CPPv4N3trl6openmp9BlockView14mult_transposeE15MatrixBlockView9BlockView">
+<span id="_CPPv3N3trl6openmp9BlockView14mult_transposeE15MatrixBlockView9BlockView"></span><span id="_CPPv2N3trl6openmp9BlockView14mult_transposeE15MatrixBlockView9BlockView"></span><span id="trl::openmp::BlockView::mult_transpose__MatrixBlockView.BlockView"></span><span class="target" id="classtrl_1_1openmp_1_1BlockView_1ae85c6454adc32c3f11f1529ae22ddd27"></span><span class="k"><span class="pre">inline</span></span><span class="w"> </span><span class="kt"><span class="pre">void</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">mult_transpose</span></span></span><span class="sig-paren">(</span><span class="n"><span class="pre">MatrixBlockView</span></span><span class="w"> </span><span class="n sig-param"><span class="pre">W</span></span>, <a class="reference internal" href="#_CPPv4I0_jEN3trl6openmp9BlockViewE" title="trl::openmp::BlockView"><span class="n"><span class="pre">BlockView</span></span></a><span class="w"> </span><span class="n sig-param"><span class="pre">other</span></span><span class="sig-paren">)</span><a class="headerlink" href="#_CPPv4N3trl6openmp9BlockView14mult_transposeE15MatrixBlockView9BlockView" title="Link to this definition"></a><br /></dt>
+<dd><p>Computes matrix-block product with transposed block matrix. </p>
+<p>Computes <span class="math notranslate nohighlight">\( Y = X W^T \)</span> where X is this block view and <span class="math notranslate nohighlight">\( W^T \)</span> is the transpose of the block matrix. </p>
+</dd></dl>
+
+<dl class="cpp function">
+<dt class="sig sig-object cpp" id="_CPPv4N3trl6openmp9BlockView3dotE9BlockView15MatrixBlockView">
+<span id="_CPPv3N3trl6openmp9BlockView3dotE9BlockView15MatrixBlockView"></span><span id="_CPPv2N3trl6openmp9BlockView3dotE9BlockView15MatrixBlockView"></span><span id="trl::openmp::BlockView::dot__BlockView.MatrixBlockView"></span><span class="target" id="classtrl_1_1openmp_1_1BlockView_1a01feee41830a8b0bb7696a13a840e608"></span><span class="k"><span class="pre">inline</span></span><span class="w"> </span><span class="kt"><span class="pre">void</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">dot</span></span></span><span class="sig-paren">(</span><a class="reference internal" href="#_CPPv4I0_jEN3trl6openmp9BlockViewE" title="trl::openmp::BlockView"><span class="n"><span class="pre">BlockView</span></span></a><span class="w"> </span><span class="n sig-param"><span class="pre">other</span></span>, <span class="n"><span class="pre">MatrixBlockView</span></span><span class="w"> </span><span class="n sig-param"><span class="pre">R</span></span><span class="sig-paren">)</span><a class="headerlink" href="#_CPPv4N3trl6openmp9BlockView3dotE9BlockView15MatrixBlockView" title="Link to this definition"></a><br /></dt>
+<dd><p>Computes block inner product. </p>
+<p>Computes <span class="math notranslate nohighlight">\( R = X^T Y \)</span> where X is this block view, Y is the other block view, and R is a small square block matrix.</p>
+<p><dl class="simple">
+<dt><strong>Implementation:</strong></dt><dd><p>Uses thread-local buffers to accumulate partial results, which are combined in a critical section to avoid race conditions. </p>
+</dd>
+</dl>
+</p>
+</dd></dl>
+
+<dl class="cpp function">
+<dt class="sig sig-object cpp" id="_CPPv4N3trl6openmp9BlockView16subtract_productE9BlockView15MatrixBlockView">
+<span id="_CPPv3N3trl6openmp9BlockView16subtract_productE9BlockView15MatrixBlockView"></span><span id="_CPPv2N3trl6openmp9BlockView16subtract_productE9BlockView15MatrixBlockView"></span><span id="trl::openmp::BlockView::subtract_product__BlockView.MatrixBlockView"></span><span class="target" id="classtrl_1_1openmp_1_1BlockView_1a1d416ab9c484613e9be230a79ae34ed1"></span><span class="k"><span class="pre">inline</span></span><span class="w"> </span><span class="kt"><span class="pre">void</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">subtract_product</span></span></span><span class="sig-paren">(</span><a class="reference internal" href="#_CPPv4I0_jEN3trl6openmp9BlockViewE" title="trl::openmp::BlockView"><span class="n"><span class="pre">BlockView</span></span></a><span class="w"> </span><span class="n sig-param"><span class="pre">other</span></span>, <span class="n"><span class="pre">MatrixBlockView</span></span><span class="w"> </span><span class="n sig-param"><span class="pre">R</span></span><span class="sig-paren">)</span><a class="headerlink" href="#_CPPv4N3trl6openmp9BlockView16subtract_productE9BlockView15MatrixBlockView" title="Link to this definition"></a><br /></dt>
+<dd><p>Subtracts a matrix-block product from this block view. </p>
+<p>Computes <span class="math notranslate nohighlight">\( X = X - Y R \)</span> where X is this block view, Y is another block view, and R is a small square block matrix. </p>
+</dd></dl>
+
+</div>
+</dd></dl>
+
+<dl class="cpp class">
+<dt class="sig sig-object cpp" id="_CPPv4I0_jEN3trl6openmp11BlockMatrixE">
+<span id="_CPPv3I0_jEN3trl6openmp11BlockMatrixE"></span><span id="_CPPv2I0_jEN3trl6openmp11BlockMatrixE"></span><span class="k"><span class="pre">template</span></span><span class="p"><span class="pre">&lt;</span></span><span class="k"><span class="pre">class</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">ScalarT</span></span></span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="kt"><span class="pre">unsigned</span></span><span class="w"> </span><span class="kt"><span class="pre">int</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">block_size</span></span></span><span class="p"><span class="pre">&gt;</span></span><br /><span class="target" id="classtrl_1_1openmp_1_1BlockMatrix"></span><span class="k"><span class="pre">class</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">BlockMatrix</span></span></span><a class="headerlink" href="#_CPPv4I0_jEN3trl6openmp11BlockMatrixE" title="Link to this definition"></a><br /></dt>
+<dd><p>OpenMP block matrix backed by aligned host memory. </p>
+<p>Backend specifics:<ul class="simple">
+<li><p>Allocates 64-byte aligned memory using std::aligned_alloc.</p></li>
+<li><p>Zero-initialized on construction.</p></li>
+<li><p>Not copyable or movable. </p></li>
+</ul>
+</p>
+<div class="breathe-sectiondef docutils container">
+<p class="breathe-sectiondef-title rubric" id="breathe-section-title-public-functions">Public Functions</p>
+<dl class="cpp function">
+<dt class="sig sig-object cpp" id="_CPPv4NK3trl6openmp11BlockMatrix10block_rowsEv">
+<span id="_CPPv3NK3trl6openmp11BlockMatrix10block_rowsEv"></span><span id="_CPPv2NK3trl6openmp11BlockMatrix10block_rowsEv"></span><span id="trl::openmp::BlockMatrix::block_rowsC"></span><span class="target" id="classtrl_1_1openmp_1_1BlockMatrix_1a90861934ec21302d3cad5321d0adeb5c"></span><span class="k"><span class="pre">inline</span></span><span class="w"> </span><span class="n"><span class="pre">std</span></span><span class="p"><span class="pre">::</span></span><span class="n"><span class="pre">size_t</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">block_rows</span></span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><span class="w"> </span><span class="k"><span class="pre">const</span></span><a class="headerlink" href="#_CPPv4NK3trl6openmp11BlockMatrix10block_rowsEv" title="Link to this definition"></a><br /></dt>
+<dd><p>Returns the number of block rows. </p>
+</dd></dl>
+
+<dl class="cpp function">
+<dt class="sig sig-object cpp" id="_CPPv4NK3trl6openmp11BlockMatrix10block_colsEv">
+<span id="_CPPv3NK3trl6openmp11BlockMatrix10block_colsEv"></span><span id="_CPPv2NK3trl6openmp11BlockMatrix10block_colsEv"></span><span id="trl::openmp::BlockMatrix::block_colsC"></span><span class="target" id="classtrl_1_1openmp_1_1BlockMatrix_1a169e31505780804da90660e537730f8e"></span><span class="k"><span class="pre">inline</span></span><span class="w"> </span><span class="n"><span class="pre">std</span></span><span class="p"><span class="pre">::</span></span><span class="n"><span class="pre">size_t</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">block_cols</span></span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><span class="w"> </span><span class="k"><span class="pre">const</span></span><a class="headerlink" href="#_CPPv4NK3trl6openmp11BlockMatrix10block_colsEv" title="Link to this definition"></a><br /></dt>
+<dd><p>Returns the number of block columns. </p>
+</dd></dl>
+
+<dl class="cpp function">
+<dt class="sig sig-object cpp" id="_CPPv4NK3trl6openmp11BlockMatrix10block_viewENSt6size_tENSt6size_tE">
+<span id="_CPPv3NK3trl6openmp11BlockMatrix10block_viewENSt6size_tENSt6size_tE"></span><span id="_CPPv2NK3trl6openmp11BlockMatrix10block_viewENSt6size_tENSt6size_tE"></span><span id="trl::openmp::BlockMatrix::block_view__std::s.std::sC"></span><span class="target" id="classtrl_1_1openmp_1_1BlockMatrix_1a0352548c23a46b3914ebea3a3f64f3e8"></span><span class="k"><span class="pre">inline</span></span><span class="w"> </span><a class="reference internal" href="#_CPPv4I0_jEN3trl6openmp9BlockViewE" title="trl::openmp::BlockView"><span class="n"><span class="pre">BlockView</span></span></a><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">block_view</span></span></span><span class="sig-paren">(</span><span class="n"><span class="pre">std</span></span><span class="p"><span class="pre">::</span></span><span class="n"><span class="pre">size_t</span></span><span class="w"> </span><span class="n sig-param"><span class="pre">block_row</span></span>, <span class="n"><span class="pre">std</span></span><span class="p"><span class="pre">::</span></span><span class="n"><span class="pre">size_t</span></span><span class="w"> </span><span class="n sig-param"><span class="pre">block_col</span></span><span class="sig-paren">)</span><span class="w"> </span><span class="k"><span class="pre">const</span></span><a class="headerlink" href="#_CPPv4NK3trl6openmp11BlockMatrix10block_viewENSt6size_tENSt6size_tE" title="Link to this definition"></a><br /></dt>
+<dd><p>Returns a view of the block at position (block_row, block_col). </p>
+<p>The returned view is a lightweight object that does not own the data. </p>
+</dd></dl>
+
+</div>
+</dd></dl>
+
+<dl class="cpp class">
+<dt class="sig sig-object cpp" id="_CPPv4I0_jEN3trl6openmp20BlockMatrixBlockViewE">
+<span id="_CPPv3I0_jEN3trl6openmp20BlockMatrixBlockViewE"></span><span id="_CPPv2I0_jEN3trl6openmp20BlockMatrixBlockViewE"></span><span class="k"><span class="pre">template</span></span><span class="p"><span class="pre">&lt;</span></span><span class="k"><span class="pre">class</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">ScalarT</span></span></span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="kt"><span class="pre">unsigned</span></span><span class="w"> </span><span class="kt"><span class="pre">int</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">block_size</span></span></span><span class="p"><span class="pre">&gt;</span></span><br /><span class="target" id="classtrl_1_1openmp_1_1BlockMatrixBlockView"></span><span class="k"><span class="pre">class</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">BlockMatrixBlockView</span></span></span><a class="headerlink" href="#_CPPv4I0_jEN3trl6openmp20BlockMatrixBlockViewE" title="Link to this definition"></a><br /></dt>
+<dd><p>OpenMP matrix block view backed by aligned host memory. </p>
+<p>Backend specifics:<ul class="simple">
+<li><p>Stores a raw pointer to row-major data.</p></li>
+<li><p>All operations are executed sequentially on the CPU.</p></li>
+<li><p>No parallelism within block operations (blocks are typically small). </p></li>
+</ul>
+</p>
+<div class="breathe-sectiondef docutils container">
+<p class="breathe-sectiondef-title rubric" id="breathe-section-title-public-functions">Public Functions</p>
+<dl class="cpp function">
+<dt class="sig sig-object cpp" id="_CPPv4N3trl6openmp20BlockMatrixBlockView9copy_fromE20BlockMatrixBlockView">
+<span id="_CPPv3N3trl6openmp20BlockMatrixBlockView9copy_fromE20BlockMatrixBlockView"></span><span id="_CPPv2N3trl6openmp20BlockMatrixBlockView9copy_fromE20BlockMatrixBlockView"></span><span id="trl::openmp::BlockMatrixBlockView::copy_from__BlockMatrixBlockView"></span><span class="target" id="classtrl_1_1openmp_1_1BlockMatrixBlockView_1af78ed6f9e958513795b18cb14b57f588"></span><span class="k"><span class="pre">inline</span></span><span class="w"> </span><span class="kt"><span class="pre">void</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">copy_from</span></span></span><span class="sig-paren">(</span><a class="reference internal" href="#_CPPv4I0_jEN3trl6openmp20BlockMatrixBlockViewE" title="trl::openmp::BlockMatrixBlockView"><span class="n"><span class="pre">BlockMatrixBlockView</span></span></a><span class="w"> </span><span class="n sig-param"><span class="pre">other</span></span><span class="sig-paren">)</span><a class="headerlink" href="#_CPPv4N3trl6openmp20BlockMatrixBlockView9copy_fromE20BlockMatrixBlockView" title="Link to this definition"></a><br /></dt>
+<dd><p>Copies matrix data from another block. </p>
+<p>Computes the element-wise assignment <span class="math notranslate nohighlight">\( A = B \)</span>. </p>
+</dd></dl>
+
+<dl class="cpp function">
+<dt class="sig sig-object cpp" id="_CPPv4N3trl6openmp20BlockMatrixBlockView19copy_from_transposeE20BlockMatrixBlockView">
+<span id="_CPPv3N3trl6openmp20BlockMatrixBlockView19copy_from_transposeE20BlockMatrixBlockView"></span><span id="_CPPv2N3trl6openmp20BlockMatrixBlockView19copy_from_transposeE20BlockMatrixBlockView"></span><span id="trl::openmp::BlockMatrixBlockView::copy_from_transpose__BlockMatrixBlockView"></span><span class="target" id="classtrl_1_1openmp_1_1BlockMatrixBlockView_1a7fe80c0aca68d6c45860d16e8c20bf91"></span><span class="k"><span class="pre">inline</span></span><span class="w"> </span><span class="kt"><span class="pre">void</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">copy_from_transpose</span></span></span><span class="sig-paren">(</span><a class="reference internal" href="#_CPPv4I0_jEN3trl6openmp20BlockMatrixBlockViewE" title="trl::openmp::BlockMatrixBlockView"><span class="n"><span class="pre">BlockMatrixBlockView</span></span></a><span class="w"> </span><span class="n sig-param"><span class="pre">other</span></span><span class="sig-paren">)</span><a class="headerlink" href="#_CPPv4N3trl6openmp20BlockMatrixBlockView19copy_from_transposeE20BlockMatrixBlockView" title="Link to this definition"></a><br /></dt>
+<dd><p>Copies transposed matrix data from another block. </p>
+<p>Computes <span class="math notranslate nohighlight">\( A = B^T \)</span> where A is this block. </p>
+</dd></dl>
+
+<dl class="cpp function">
+<dt class="sig sig-object cpp" id="_CPPv4N3trl6openmp20BlockMatrixBlockView8set_zeroEv">
+<span id="_CPPv3N3trl6openmp20BlockMatrixBlockView8set_zeroEv"></span><span id="_CPPv2N3trl6openmp20BlockMatrixBlockView8set_zeroEv"></span><span id="trl::openmp::BlockMatrixBlockView::set_zero"></span><span class="target" id="classtrl_1_1openmp_1_1BlockMatrixBlockView_1abc4252292fc13e4a0302247241397d85"></span><span class="k"><span class="pre">inline</span></span><span class="w"> </span><span class="kt"><span class="pre">void</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">set_zero</span></span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#_CPPv4N3trl6openmp20BlockMatrixBlockView8set_zeroEv" title="Link to this definition"></a><br /></dt>
+<dd><p>Sets all matrix entries to zero. </p>
+<p>Computes <span class="math notranslate nohighlight">\( A_{ij} = 0 \)</span> for all <span class="math notranslate nohighlight">\( i, j \)</span>. </p>
+</dd></dl>
+
+<dl class="cpp function">
+<dt class="sig sig-object cpp" id="_CPPv4N3trl6openmp20BlockMatrixBlockView4multE20BlockMatrixBlockView20BlockMatrixBlockView">
+<span id="_CPPv3N3trl6openmp20BlockMatrixBlockView4multE20BlockMatrixBlockView20BlockMatrixBlockView"></span><span id="_CPPv2N3trl6openmp20BlockMatrixBlockView4multE20BlockMatrixBlockView20BlockMatrixBlockView"></span><span id="trl::openmp::BlockMatrixBlockView::mult__BlockMatrixBlockView.BlockMatrixBlockView"></span><span class="target" id="classtrl_1_1openmp_1_1BlockMatrixBlockView_1a771375bad8b3cdd9f4f45eeeeda9db2f"></span><span class="k"><span class="pre">inline</span></span><span class="w"> </span><span class="kt"><span class="pre">void</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">mult</span></span></span><span class="sig-paren">(</span><a class="reference internal" href="#_CPPv4I0_jEN3trl6openmp20BlockMatrixBlockViewE" title="trl::openmp::BlockMatrixBlockView"><span class="n"><span class="pre">BlockMatrixBlockView</span></span></a><span class="w"> </span><span class="n sig-param"><span class="pre">B</span></span>, <a class="reference internal" href="#_CPPv4I0_jEN3trl6openmp20BlockMatrixBlockViewE" title="trl::openmp::BlockMatrixBlockView"><span class="n"><span class="pre">BlockMatrixBlockView</span></span></a><span class="w"> </span><span class="n sig-param"><span class="pre">C</span></span><span class="sig-paren">)</span><a class="headerlink" href="#_CPPv4N3trl6openmp20BlockMatrixBlockView4multE20BlockMatrixBlockView20BlockMatrixBlockView" title="Link to this definition"></a><br /></dt>
+<dd><p>Computes matrix-matrix product. </p>
+<p>Computes <span class="math notranslate nohighlight">\( C = A B \)</span> where A is this block matrix. </p>
+</dd></dl>
+
+<dl class="cpp function">
+<dt class="sig sig-object cpp" id="_CPPv4N3trl6openmp20BlockMatrixBlockView12set_diagonalENSt4spanI7ScalarTEE">
+<span id="_CPPv3N3trl6openmp20BlockMatrixBlockView12set_diagonalENSt4spanI7ScalarTEE"></span><span id="_CPPv2N3trl6openmp20BlockMatrixBlockView12set_diagonalENSt4spanI7ScalarTEE"></span><span id="trl::openmp::BlockMatrixBlockView::set_diagonal__std::span:ScalarT:"></span><span class="target" id="classtrl_1_1openmp_1_1BlockMatrixBlockView_1a91b53914b8067783bc273583638a3c4e"></span><span class="k"><span class="pre">inline</span></span><span class="w"> </span><span class="kt"><span class="pre">void</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">set_diagonal</span></span></span><span class="sig-paren">(</span><span class="n"><span class="pre">std</span></span><span class="p"><span class="pre">::</span></span><span class="n"><span class="pre">span</span></span><span class="p"><span class="pre">&lt;</span></span><a class="reference internal" href="#_CPPv4I0_jEN3trl6openmp20BlockMatrixBlockViewE" title="trl::openmp::BlockMatrixBlockView::ScalarT"><span class="n"><span class="pre">ScalarT</span></span></a><span class="p"><span class="pre">&gt;</span></span><span class="w"> </span><span class="n sig-param"><span class="pre">values</span></span><span class="sig-paren">)</span><a class="headerlink" href="#_CPPv4N3trl6openmp20BlockMatrixBlockView12set_diagonalENSt4spanI7ScalarTEE" title="Link to this definition"></a><br /></dt>
+<dd><p>Sets the diagonal entries of the matrix. </p>
+<p>Sets <span class="math notranslate nohighlight">\( A_{ii} \)</span> to values[i] for all diagonal indices <span class="math notranslate nohighlight">\( i \)</span>. Off-diagonal entries remain unchanged. </p>
+</dd></dl>
+
+</div>
+</dd></dl>
+
+</section>
+</section>
+
+
+           </div>
+          </div>
+          <footer><div class="rst-footer-buttons" role="navigation" aria-label="Footer">
+        <a href="../index.html" class="btn btn-neutral float-left" title="trl - Thick Restart (Block) Lanczos" accesskey="p" rel="prev"><span class="fa fa-arrow-circle-left" aria-hidden="true"></span> Previous</a>
+        <a href="sycl.html" class="btn btn-neutral float-right" title="SYCL Backend" accesskey="n" rel="next">Next <span class="fa fa-arrow-circle-right" aria-hidden="true"></span></a>
+    </div>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2026, Nils Friess.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>
