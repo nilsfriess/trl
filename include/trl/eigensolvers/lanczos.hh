@@ -2,6 +2,7 @@
 
 #include "../concepts.hh"
 #include "params.hh"
+#include "reorthogonalization.hh"
 
 #include <algorithm>
 #include <cassert>
@@ -9,7 +10,8 @@
 #include <memory>
 
 namespace trl {
-template <Eigenproblem EVP>
+template <Eigenproblem EVP, class Reorth = ModifiedGS>
+  requires ReorthogonalizationStrategy<Reorth, EVP, typename EVP::BlockMultivector>
 class BlockLanczos {
 public:
   using BMV = typename EVP::BlockMultivector;
@@ -160,11 +162,7 @@ public:
       }
 
       // Reorthogonalise against all previous blocks
-      for (unsigned int j = 0; j < k + 1; ++j) {
-        auto Vj = V.block_view(j);
-        evp->dot(Vj, Vk1, Z0);
-        Vk1.subtract_product(Vj, Z0);
-      }
+      reorthogonalize_against(Vk1, k + 1, Z0);
 
       // Step 6: Orthonormalize V_{i+1} to get beta_i (Cholesky factor) and V_{i+1}
       evp->orthonormalize(Vk1, beta);
@@ -258,12 +256,7 @@ public:
       V_next -= W0;
 
       // Step 5: Full reorthogonalization
-      for (unsigned int j = 0; j < i + 1; ++j) {
-        auto Vj = V.block_view(j);
-
-        evp->dot(Vj, V_next, Z0);
-        V_next.subtract_product(Vj, Z0);
-      }
+      reorthogonalize_against(V_next, i + 1, Z0);
 
       // Step 6: Orthonormalize V_{i+1} to get beta_i (Cholesky factor) and V_{i+1}
       evp->orthonormalize(V_next, beta);
@@ -303,5 +296,9 @@ private:
 
   typename BMV::BlockMatrix T; // Block tridiagonal matrix
   typename BMV::BlockMatrix B; // Temp matrix
+
+  Reorth reorth_{};
+
+  void reorthogonalize_against(typename BMV::BlockView V_next, unsigned int count, typename BMV::BlockMatrix::BlockView tmp) { reorth_(*evp, V, count, V_next, tmp); }
 };
 } // namespace trl
