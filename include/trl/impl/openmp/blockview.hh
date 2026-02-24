@@ -8,15 +8,15 @@
 #include <cstddef>
 
 namespace trl::openmp {
-  /** @brief OpenMP block view backed by aligned host memory.
-   *
-   *  Backend specifics:
-   *  - Data is stored in row-major order with 64-byte alignment.
-   *  - Operations use OpenMP parallel loops and SIMD pragmas.
-   *  - The view is lightweight (std::span-like); copying the view is cheap
-   *    but does not copy the underlying data.
-   *  - dot() uses thread-local buffers combined in a critical section.
-   */
+/** @brief OpenMP block view backed by aligned host memory.
+ *
+ *  Backend specifics:
+ *  - Data is stored in row-major order with 64-byte alignment.
+ *  - Operations use OpenMP parallel loops and SIMD pragmas.
+ *  - The view is lightweight (std::span-like); copying the view is cheap
+ *    but does not copy the underlying data.
+ *  - dot() uses thread-local buffers combined in a critical section.
+ */
 template <class ScalarT, unsigned int block_size>
 class BlockView {
 public:
@@ -28,7 +28,12 @@ public:
    *
    *  Computes \f$ X_{ij} = 0 \f$ for all \f$ i, j \f$.
    */
-  void set_zero() { std::fill_n(data_, n_ * block_size, 0); }
+  void set_zero()
+  {
+    const std::size_t total = n_ * block_size;
+#pragma omp parallel for
+    for (std::size_t i = 0; i < total; ++i) data_[i] = ScalarT{};
+  }
 
   /** @brief Returns the number of rows in the block. */
   std::size_t rows() const { return n_; }
@@ -98,7 +103,6 @@ public:
    */
   void mult(MatrixBlockView W, BlockView other)
   {
-    other.set_zero();
 #pragma omp parallel for
     for (std::size_t k = 0; k < n_; ++k) {
       alignas(64) std::array<ScalarT, block_size> tmp{};
@@ -121,7 +125,6 @@ public:
    */
   void mult_transpose(MatrixBlockView W, BlockView other)
   {
-    other.set_zero();
 #pragma omp parallel for
     for (std::size_t k = 0; k < n_; ++k) {
       alignas(64) std::array<ScalarT, block_size> tmp{};
@@ -153,8 +156,9 @@ public:
 #pragma omp parallel
     {
       alignas(64) std::array<ScalarT, block_size * block_size> R_temp{};
+      const std::size_t upper = (n_ >= 4) ? n_ - 3 : 0;
 #pragma omp for
-      for (std::size_t k = 0; k < n_ - 3; k += 4) {
+      for (std::size_t k = 0; k < upper; k += 4) {
         for (std::size_t i = 0; i < block_size; ++i)
 #pragma omp simd
           for (std::size_t j = 0; j < block_size; ++j) {
