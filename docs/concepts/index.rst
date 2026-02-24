@@ -13,4 +13,7 @@ Each Eigenproblem must export certain types which themselves must adhere to cert
    :project: trl
 
 .. doxygenconcept:: trl::BlockMatrixConcept
-   :project: trl                                      
+   :project: trl
+
+.. doxygenconcept:: trl::ReorthogonalizationStrategy
+   :project: trl

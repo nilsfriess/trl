@@ -10,6 +10,15 @@
 #include <memory>
 
 namespace trl {
+/** @brief Block Lanczos eigensolver with thick restart.
+ *
+ *  Computes a subset of eigenvalues and eigenvectors of the eigenproblem
+ *  defined by @p EVP using a restarted block Krylov iteration.
+ *
+ *  @tparam EVP  Eigenproblem type satisfying the \ref trl::Eigenproblem concept.
+ *  @tparam Reorth  Reorthogonalization strategy. Must satisfy
+ *          \ref trl::ReorthogonalizationStrategy. Defaults to \ref trl::ModifiedGS.
+ */
 template <Eigenproblem EVP, class Reorth = ModifiedGS>
   requires ReorthogonalizationStrategy<Reorth, EVP, typename EVP::BlockMultivector>
 class BlockLanczos {

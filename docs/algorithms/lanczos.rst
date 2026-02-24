@@ -11,6 +11,23 @@ Additionally, it implements the so-called thick restart variant: when the algori
 has extended the Lanczos basis to the maximum allowed size (as given by the user)
 it restarts the method using the information contained in the current basis.
 
+Reorthogonalization
+-------------------
+
+Full reorthogonalization is performed at each Lanczos step using a pluggable
+strategy, passed as the second template parameter of :cpp:class:`trl::BlockLanczos`
+(default: :cpp:struct:`trl::ModifiedGS`). Custom strategies must satisfy the
+:cpp:concept:`trl::ReorthogonalizationStrategy` concept.
+
+.. doxygenstruct:: trl::ModifiedGS
+   :project: trl
+
+.. doxygenconcept:: trl::ReorthogonalizationStrategy
+   :project: trl
+
+API Reference
+-------------
+
 .. doxygenclass:: trl::BlockLanczos
    :project: trl
    :members:
