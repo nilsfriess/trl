@@ -1,0 +1,231 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="../">
+<head>
+  <meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Lanczos Method &mdash; trl 0.1 documentation</title>
+      <link rel="stylesheet" type="text/css" href="../_static/pygments.css?v=80d5e7a1" />
+      <link rel="stylesheet" type="text/css" href="../_static/css/theme.css?v=9edc463e" />
+
+  
+      <script src="../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../_static/documentation_options.js?v=2709fde1"></script>
+      <script src="../_static/doctools.js?v=fd6eb6e6"></script>
+      <script src="../_static/sphinx_highlight.js?v=6ffebe34"></script>
+      <script defer="defer" src="https://cdn.jsdelivr.net/npm/mathjax@4/tex-mml-chtml.js"></script>
+    <script src="../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="prev" title="Overview of the concepts" href="../concepts/index.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="../index.html" class="icon icon-home">
+            trl
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">Backends:</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../backends/openmp.html">OpenMP Backend</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../backends/sycl.html">SYCL Backend</a></li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">C++ 20 Concepts</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../concepts/index.html">Overview of the concepts</a></li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">Algorithms:</span></p>
+<ul class="current">
+<li class="toctree-l1 current"><a class="current reference internal" href="#">Lanczos Method</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="#reorthogonalization">Reorthogonalization</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="#_CPPv4N3trl10ModifiedGSE"><code class="docutils literal notranslate"><span class="pre">trl::ModifiedGS</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="#api-reference">API Reference</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="#_CPPv4I_12Eigenproblem0EN3trl12BlockLanczosE"><code class="docutils literal notranslate"><span class="pre">trl::BlockLanczos</span></code></a><ul>
+<li class="toctree-l4"><a class="reference internal" href="#_CPPv4N3trl12BlockLanczos5solveEv"><code class="docutils literal notranslate"><span class="pre">solve()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#_CPPv4N3trl12BlockLanczos13initial_blockEv"><code class="docutils literal notranslate"><span class="pre">initial_block()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#_CPPv4N3trl12BlockLanczos9get_basisEv"><code class="docutils literal notranslate"><span class="pre">get_basis()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#_CPPv4N3trl12BlockLanczos5get_TEv"><code class="docutils literal notranslate"><span class="pre">get_T()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#_CPPv4N3trl12BlockLanczos5get_BEv"><code class="docutils literal notranslate"><span class="pre">get_B()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#_CPPv4NK3trl12BlockLanczos9get_nconvEv"><code class="docutils literal notranslate"><span class="pre">get_nconv()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#_CPPv4N3trl12BlockLanczos6extendEjj"><code class="docutils literal notranslate"><span class="pre">extend()</span></code></a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../index.html">trl</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../index.html" class="icon icon-home" aria-label="Home"></a></li>
+      <li class="breadcrumb-item active">Lanczos Method</li>
+      <li class="wy-breadcrumbs-aside">
+            <a href="../_sources/algorithms/lanczos.rst.txt" rel="nofollow"> View page source</a>
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <section id="lanczos-method">
+<h1>Lanczos Method<a class="headerlink" href="#lanczos-method" title="Link to this heading"></a></h1>
+<p>The Lanczos algorithm is an iterative method for finding a subset of
+eigenvalues and eigenvectors of large sparse matrices. This implementation is
+a <em>block</em> variant of the standard algorithm, i.e., instead of iterating with single
+vectors it iterates with blocks of vectors (the standard algorithm can of course be
+recovered by using blockvectors with block size one).</p>
+<p>Additionally, it implements the so-called thick restart variant: when the algorithm
+has extended the Lanczos basis to the maximum allowed size (as given by the user)
+it restarts the method using the information contained in the current basis.</p>
+<section id="reorthogonalization">
+<h2>Reorthogonalization<a class="headerlink" href="#reorthogonalization" title="Link to this heading"></a></h2>
+<p>Full reorthogonalization is performed at each Lanczos step using a pluggable
+strategy, passed as the second template parameter of <a class="reference internal" href="#_CPPv4I_12Eigenproblem0EN3trl12BlockLanczosE" title="trl::BlockLanczos"><code class="xref cpp cpp-class docutils literal notranslate"><span class="pre">trl::BlockLanczos</span></code></a>
+(default: <a class="reference internal" href="#_CPPv4N3trl10ModifiedGSE" title="trl::ModifiedGS"><code class="xref cpp cpp-struct docutils literal notranslate"><span class="pre">trl::ModifiedGS</span></code></a>). Custom strategies must satisfy the
+<a class="reference internal" href="../concepts/index.html#_CPPv4I000EN3trl27ReorthogonalizationStrategyE" title="trl::ReorthogonalizationStrategy"><code class="xref cpp cpp-concept docutils literal notranslate"><span class="pre">trl::ReorthogonalizationStrategy</span></code></a> concept (see <a class="reference internal" href="../concepts/index.html"><span class="doc">Overview of the concepts</span></a>).</p>
+<dl class="cpp struct">
+<dt class="sig sig-object cpp" id="_CPPv4N3trl10ModifiedGSE">
+<span id="_CPPv3N3trl10ModifiedGSE"></span><span id="_CPPv2N3trl10ModifiedGSE"></span><span id="trl::ModifiedGS"></span><span class="target" id="structtrl_1_1ModifiedGS"></span><span class="k"><span class="pre">struct</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">ModifiedGS</span></span></span><a class="headerlink" href="#_CPPv4N3trl10ModifiedGSE" title="Link to this definition"></a><br /></dt>
+<dd><p>Modified Gram-Schmidt reorthogonalization. </p>
+<p>For each basis vector <span class="math notranslate nohighlight">\( v_j \)</span> in turn, projects out its component from <span class="math notranslate nohighlight">\( v \)</span> and updates <span class="math notranslate nohighlight">\( v \)</span> immediately before moving to <span class="math notranslate nohighlight">\( v_{j+1} \)</span>. </p>
+</dd></dl>
+
+</section>
+<section id="api-reference">
+<h2>API Reference<a class="headerlink" href="#api-reference" title="Link to this heading"></a></h2>
+<dl class="cpp class">
+<dt class="sig sig-object cpp" id="_CPPv4I_12Eigenproblem0EN3trl12BlockLanczosE">
+<span id="_CPPv3I_12Eigenproblem0EN3trl12BlockLanczosE"></span><span id="_CPPv2I_12Eigenproblem0EN3trl12BlockLanczosE"></span><span class="k"><span class="pre">template</span></span><span class="p"><span class="pre">&lt;</span></span><a class="reference internal" href="../concepts/index.html#_CPPv4I0EN3trl12EigenproblemE" title="trl::Eigenproblem"><span class="n"><span class="pre">Eigenproblem</span></span></a><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">EVP</span></span></span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="k"><span class="pre">class</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">Reorth</span></span></span><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><a class="reference internal" href="#_CPPv4N3trl10ModifiedGSE" title="trl::ModifiedGS"><span class="n"><span class="pre">ModifiedGS</span></span></a><span class="p"><span class="pre">&gt;</span></span><br /><span class="target" id="classtrl_1_1BlockLanczos"></span><span class="k"><span class="pre">class</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">BlockLanczos</span></span></span><a class="headerlink" href="#_CPPv4I_12Eigenproblem0EN3trl12BlockLanczosE" title="Link to this definition"></a><br /></dt>
+<dd><p>Block Lanczos eigensolver with thick restart. </p>
+<p>Computes a subset of eigenvalues and eigenvectors of the eigenproblem defined by <code class="docutils literal notranslate"><span class="pre">EVP</span></code> using a restarted block Krylov iteration.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Template Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>EVP</strong> – Eigenproblem type satisfying the <a class="reference internal" href="../concepts/index.html#concepttrl_1_1Eigenproblem"><span class="std std-ref">trl::Eigenproblem</span></a> concept. </p></li>
+<li><p><strong>Reorth</strong> – Reorthogonalization strategy. Must satisfy <a class="reference internal" href="../concepts/index.html#concepttrl_1_1ReorthogonalizationStrategy"><span class="std std-ref">trl::ReorthogonalizationStrategy</span></a>. Defaults to <a class="reference internal" href="#structtrl_1_1ModifiedGS"><span class="std std-ref">trl::ModifiedGS</span></a>. </p></li>
+</ul>
+</dd>
+</dl>
+<div class="breathe-sectiondef docutils container">
+<p class="breathe-sectiondef-title rubric" id="breathe-section-title-public-functions">Public Functions</p>
+<dl class="cpp function">
+<dt class="sig sig-object cpp" id="_CPPv4N3trl12BlockLanczos5solveEv">
+<span id="_CPPv3N3trl12BlockLanczos5solveEv"></span><span id="_CPPv2N3trl12BlockLanczos5solveEv"></span><span id="trl::BlockLanczos::solve"></span><span class="target" id="classtrl_1_1BlockLanczos_1a3daf5ca2414916bf406fd1673976084a"></span><span class="k"><span class="pre">inline</span></span><span class="w"> </span><span class="n"><span class="pre">EigensolverResult</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">solve</span></span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#_CPPv4N3trl12BlockLanczos5solveEv" title="Link to this definition"></a><br /></dt>
+<dd><p>Solves the eigenvalue problem using thick-restart Lanczos. </p>
+</dd></dl>
+
+<dl class="cpp function">
+<dt class="sig sig-object cpp" id="_CPPv4N3trl12BlockLanczos13initial_blockEv">
+<span id="_CPPv3N3trl12BlockLanczos13initial_blockEv"></span><span id="_CPPv2N3trl12BlockLanczos13initial_blockEv"></span><span id="trl::BlockLanczos::initial_block"></span><span class="target" id="classtrl_1_1BlockLanczos_1ae59158d86c54ed2d48e959937de0c90e"></span><span class="k"><span class="pre">inline</span></span><span class="w"> </span><span class="kt"><span class="pre">auto</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">initial_block</span></span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#_CPPv4N3trl12BlockLanczos13initial_blockEv" title="Link to this definition"></a><br /></dt>
+<dd><p>Get the initial block V_0 for initialization. </p>
+<p>The user must initialize this block before calling <a class="reference internal" href="#classtrl_1_1BlockLanczos_1a3daf5ca2414916bf406fd1673976084a"><span class="std std-ref">solve()</span></a>. </p>
+</dd></dl>
+
+<dl class="cpp function">
+<dt class="sig sig-object cpp" id="_CPPv4N3trl12BlockLanczos9get_basisEv">
+<span id="_CPPv3N3trl12BlockLanczos9get_basisEv"></span><span id="_CPPv2N3trl12BlockLanczos9get_basisEv"></span><span id="trl::BlockLanczos::get_basis"></span><span class="target" id="classtrl_1_1BlockLanczos_1a3efb81ce054efb441acb15902131af07"></span><span class="k"><span class="pre">inline</span></span><span class="w"> </span><span class="kt"><span class="pre">auto</span></span><span class="w"> </span><span class="p"><span class="pre">&amp;</span></span><span class="sig-name descname"><span class="n"><span class="pre">get_basis</span></span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#_CPPv4N3trl12BlockLanczos9get_basisEv" title="Link to this definition"></a><br /></dt>
+<dd><p>Return the current Lanczos vectors. </p>
+</dd></dl>
+
+<dl class="cpp function">
+<dt class="sig sig-object cpp" id="_CPPv4N3trl12BlockLanczos5get_TEv">
+<span id="_CPPv3N3trl12BlockLanczos5get_TEv"></span><span id="_CPPv2N3trl12BlockLanczos5get_TEv"></span><span id="trl::BlockLanczos::get_T"></span><span class="target" id="classtrl_1_1BlockLanczos_1aa31965d91e6fb9831447e4891f66c7a4"></span><span class="k"><span class="pre">inline</span></span><span class="w"> </span><span class="kt"><span class="pre">auto</span></span><span class="w"> </span><span class="p"><span class="pre">&amp;</span></span><span class="sig-name descname"><span class="n"><span class="pre">get_T</span></span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#_CPPv4N3trl12BlockLanczos5get_TEv" title="Link to this definition"></a><br /></dt>
+<dd><p>Return the block tridiagonal matrix T. </p>
+</dd></dl>
+
+<dl class="cpp function">
+<dt class="sig sig-object cpp" id="_CPPv4N3trl12BlockLanczos5get_BEv">
+<span id="_CPPv3N3trl12BlockLanczos5get_BEv"></span><span id="_CPPv2N3trl12BlockLanczos5get_BEv"></span><span id="trl::BlockLanczos::get_B"></span><span class="target" id="classtrl_1_1BlockLanczos_1a9485babc3b69fdbd67d62916fdf1c1d4"></span><span class="k"><span class="pre">inline</span></span><span class="w"> </span><span class="kt"><span class="pre">auto</span></span><span class="w"> </span><span class="p"><span class="pre">&amp;</span></span><span class="sig-name descname"><span class="n"><span class="pre">get_B</span></span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#_CPPv4N3trl12BlockLanczos5get_BEv" title="Link to this definition"></a><br /></dt>
+<dd><p>Return the B matrix containing beta values. </p>
+</dd></dl>
+
+<dl class="cpp function">
+<dt class="sig sig-object cpp" id="_CPPv4NK3trl12BlockLanczos9get_nconvEv">
+<span id="_CPPv3NK3trl12BlockLanczos9get_nconvEv"></span><span id="_CPPv2NK3trl12BlockLanczos9get_nconvEv"></span><span id="trl::BlockLanczos::get_nconvC"></span><span class="target" id="classtrl_1_1BlockLanczos_1a8bf3ef65dedcc198a430f70eda17598b"></span><span class="k"><span class="pre">inline</span></span><span class="w"> </span><span class="kt"><span class="pre">unsigned</span></span><span class="w"> </span><span class="kt"><span class="pre">int</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">get_nconv</span></span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><span class="w"> </span><span class="k"><span class="pre">const</span></span><a class="headerlink" href="#_CPPv4NK3trl12BlockLanczos9get_nconvEv" title="Link to this definition"></a><br /></dt>
+<dd><p>Return the number of converged eigenvalues. </p>
+</dd></dl>
+
+<dl class="cpp function">
+<dt class="sig sig-object cpp" id="_CPPv4N3trl12BlockLanczos6extendEjj">
+<span id="_CPPv3N3trl12BlockLanczos6extendEjj"></span><span id="_CPPv2N3trl12BlockLanczos6extendEjj"></span><span id="trl::BlockLanczos::extend__unsigned-i.unsigned-i"></span><span class="target" id="classtrl_1_1BlockLanczos_1a3332b176a1e4f933dbca992095b18801"></span><span class="k"><span class="pre">inline</span></span><span class="w"> </span><span class="kt"><span class="pre">unsigned</span></span><span class="w"> </span><span class="kt"><span class="pre">int</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">extend</span></span></span><span class="sig-paren">(</span><span class="kt"><span class="pre">unsigned</span></span><span class="w"> </span><span class="kt"><span class="pre">int</span></span><span class="w"> </span><span class="n sig-param"><span class="pre">k</span></span>, <span class="kt"><span class="pre">unsigned</span></span><span class="w"> </span><span class="kt"><span class="pre">int</span></span><span class="w"> </span><span class="n sig-param"><span class="pre">m</span></span><span class="sig-paren">)</span><a class="headerlink" href="#_CPPv4N3trl12BlockLanczos6extendEjj" title="Link to this definition"></a><br /></dt>
+<dd><p>Extend the Lanczos basis from a step-k block factorisation to a step-m block factorisation. </p>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>The parameters k and m are counted in blocks.</p>
+</div>
+<dl class="field-list simple">
+<dt class="field-odd">Returns<span class="colon">:</span></dt>
+<dd class="field-odd"><p>The number of operator applications (i.e. the number of calls to evp-&gt;apply) </p>
+</dd>
+</dl>
+</dd></dl>
+
+</div>
+</dd></dl>
+
+</section>
+</section>
+
+
+           </div>
+          </div>
+          <footer><div class="rst-footer-buttons" role="navigation" aria-label="Footer">
+        <a href="../concepts/index.html" class="btn btn-neutral float-left" title="Overview of the concepts" accesskey="p" rel="prev"><span class="fa fa-arrow-circle-left" aria-hidden="true"></span> Previous</a>
+    </div>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2026, Nils Friess.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>
