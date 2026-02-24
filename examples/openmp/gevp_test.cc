@@ -34,7 +34,7 @@ int main(int argc, char* argv[])
     std::cerr << "Usage: " << argv[0] << " <matrixA.mtx> <matrixB.mtx> [nev] [ncv]\n";
     std::cerr << "  matrixA.mtx: Path to a Matrix Market file (the A matrix)\n";
     std::cerr << "  matrixB.mtx: Path to a Matrix Market file (the B matrix)\n";
-    std::cerr << "  nev: Number of eigenvalues to compute (default: 10)\n";
+    std::cerr << "  nev: Number of eigenvalues to compute (default: 16)\n";
     std::cerr << "  ncv: Number of Lanczos vectors (default: 4 * nev)\n";
     return 1;
   }
