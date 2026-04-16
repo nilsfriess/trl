@@ -28,7 +28,7 @@ public:
       , block_rows_(block_rows)
       , block_cols_(block_cols)
   {
-    data_ = ::sycl::malloc_shared<T>(block_rows * block_cols * bs * bs, queue);
+    data_ = ::sycl::malloc_device<T>(block_rows * block_cols * bs * bs, queue);
     // Zero-initialize the matrix
     queue.memset(data_, 0, block_rows * block_cols * bs * bs * sizeof(T)).wait();
   }
@@ -44,7 +44,7 @@ public:
       , block_rows_(other.block_rows_)
       , block_cols_(other.block_cols_)
   {
-    data_ = ::sycl::malloc_shared<T>(block_rows_ * block_cols_ * bs * bs, queue);
+    data_ = ::sycl::malloc_device<T>(block_rows_ * block_cols_ * bs * bs, queue);
     queue.memcpy(data_, other.data_, block_rows_ * block_cols_ * bs * bs * sizeof(T)).wait();
   }
 
@@ -55,7 +55,7 @@ public:
       queue = other.queue;
       block_rows_ = other.block_rows_;
       block_cols_ = other.block_cols_;
-      data_ = ::sycl::malloc_shared<T>(block_rows_ * block_cols_ * bs * bs, queue);
+      data_ = ::sycl::malloc_device<T>(block_rows_ * block_cols_ * bs * bs, queue);
       queue.memcpy(data_, other.data_, block_rows_ * block_cols_ * bs * bs * sizeof(T)).wait();
     }
     return *this;

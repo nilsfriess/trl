@@ -36,7 +36,7 @@ public:
   {
     if (cols % blocksize != 0) throw std::invalid_argument("Number of columns must be divisible by blocksize");
 
-    data = ::sycl::malloc_shared<T>(rows * cols, queue);
+    data = ::sycl::malloc_device<T>(rows * cols, queue);
     queue.memset(data, 0, rows * cols * sizeof(T)).wait();
   }
 
@@ -45,7 +45,7 @@ public:
       , rows(other.rows)
       , blocks_(other.blocks_)
   {
-    data = ::sycl::malloc_shared<T>(rows * blocks_ * bs, queue);
+    data = ::sycl::malloc_device<T>(rows * blocks_ * bs, queue);
     queue.memset(data, 0, rows * blocks_ * bs * sizeof(T)).wait();
   }
 
@@ -57,7 +57,7 @@ public:
       queue = other.queue;
       rows = other.rows;
       blocks_ = other.blocks_;
-      data = ::sycl::malloc_shared<T>(rows * blocks_ * bs, queue);
+      data = ::sycl::malloc_device<T>(rows * blocks_ * bs, queue);
       queue.memset(data, 0, rows * blocks_ * bs * sizeof(T)).wait();
     }
     return *this;
