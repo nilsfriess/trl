@@ -76,8 +76,7 @@ constexpr BenchmarkMetrics dot_metrics(std::size_t rows)
 template <class Scalar, unsigned int cols>
 constexpr BenchmarkMetrics gemm_metrics(std::size_t rows)
 {
-  constexpr double flops_per_output_entry = 2.0 * cols + 1.0;
-  const double flops = static_cast<double>(rows) * cols * flops_per_output_entry;
+  const double flops = 2.0 * static_cast<double>(rows) * cols * cols;
   const double bytes =
       static_cast<double>((3 * rows * cols + cols * cols) * sizeof(Scalar));
   return BenchmarkMetrics{flops, flops / bytes};
