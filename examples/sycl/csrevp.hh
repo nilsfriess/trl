@@ -1,16 +1,15 @@
 #pragma once
 
+#include "evp_base.hh"
+
 #include <algorithm>
 #include <fstream>
 #include <limits>
 #include <sstream>
 #include <stdexcept>
 #include <string>
-#include <vector>
-
 #include <sycl/sycl.hpp>
-
-#include "evp_base.hh"
+#include <vector>
 
 // CSR (Compressed Sparse Row) matrix storage
 struct CSRMatrix {
@@ -40,9 +39,7 @@ inline CSRMatrix load_matrix_market(const std::string& filepath, sycl::queue& qu
         // Convert to lowercase for case-insensitive comparison
         std::string lower_line = line;
         std::transform(lower_line.begin(), lower_line.end(), lower_line.begin(), ::tolower);
-        if (lower_line.find("symmetric") != std::string::npos) {
-          is_symmetric = true;
-        }
+        if (lower_line.find("symmetric") != std::string::npos) is_symmetric = true;
       }
       continue;
     }
@@ -60,6 +57,7 @@ inline CSRMatrix load_matrix_market(const std::string& filepath, sycl::queue& qu
   std::vector<int> coo_rows;
   std::vector<int> coo_cols;
   std::vector<double> coo_vals;
+
   coo_rows.reserve(is_symmetric ? 2 * num_entries_in_file : num_entries_in_file);
   coo_cols.reserve(is_symmetric ? 2 * num_entries_in_file : num_entries_in_file);
   coo_vals.reserve(is_symmetric ? 2 * num_entries_in_file : num_entries_in_file);
@@ -101,9 +99,7 @@ inline CSRMatrix load_matrix_market(const std::string& filepath, sycl::queue& qu
   for (int i = 0; i <= num_rows; i++) matrix.row_offsets[i] = 0;
 
   // Count entries per row
-  for (int i = 0; i < num_nonzeros; i++) {
-    matrix.row_offsets[coo_rows[i] + 1]++;
-  }
+  for (int i = 0; i < num_nonzeros; i++) matrix.row_offsets[coo_rows[i] + 1]++;
 
   // Convert counts to prefix sum (row_offsets)
   for (int i = 1; i <= num_rows; i++) matrix.row_offsets[i] += matrix.row_offsets[i - 1];
@@ -161,6 +157,9 @@ public:
     // Compute Y = A * X where A is sparse (CSR) and X is a tall-skinny matrix
     // X and Y are stored row-major with bs columns per row
 
+    const auto ncus = this->queue.get_device().template get_info<::sycl::info::device::max_compute_units>();
+    const auto global_size = 128 * bs * ncus;
+
     T* X_data = X.data;
     T* Y_data = Y.data;
     const int* row_offsets = matrix_.row_offsets;
@@ -168,20 +167,23 @@ public:
     const double* values = matrix_.values;
     const std::size_t num_rows = matrix_.num_rows;
 
-    this->queue.parallel_for(sycl::range<1>(num_rows), [=](sycl::id<1> idx) {
-      const std::size_t row = idx[0];
-      const int row_start = row_offsets[row];
-      const int row_end = row_offsets[row + 1];
+    this->queue.parallel_for(sycl::range<1>(global_size), [=](sycl::id<1> idx) {
+      const std::size_t start = idx[0];
 
-      // Initialize output row to zero
-      for (std::size_t j = 0; j < bs; ++j) Y_data[row * bs + j] = T(0);
+      for (std::size_t row = start; row < num_rows; row += global_size) {
+        const int row_start = row_offsets[row];
+        const int row_end = row_offsets[row + 1];
 
-      // Accumulate contributions from all nonzeros in this row
-      for (int k = row_start; k < row_end; ++k) {
-        const std::size_t col = col_indices[k];
-        const T val = static_cast<T>(values[k]);
+        // Initialize output row to zero
+        for (std::size_t j = 0; j < bs; ++j) Y_data[row * bs + j] = T(0);
 
-        for (std::size_t j = 0; j < bs; ++j) Y_data[row * bs + j] += val * X_data[col * bs + j];
+        // Accumulate contributions from all nonzeros in this row
+        for (int k = row_start; k < row_end; ++k) {
+          const std::size_t col = col_indices[k];
+          const T val = static_cast<T>(values[k]);
+
+          for (std::size_t j = 0; j < bs; ++j) Y_data[row * bs + j] += val * X_data[col * bs + j];
+        }
       }
     });
   }

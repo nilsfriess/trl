@@ -2,13 +2,10 @@
 
 #include <Eigen/Core>
 #include <Eigen/Dense>
-
 #include <iostream>
 #include <optional>
 #include <span>
-
 #include <sycl/sycl.hpp>
-
 #include <trl/impl/sycl/multivector.hh>
 
 template <class T, unsigned int bs>
@@ -45,23 +42,29 @@ public:
     V.dot(V, R);
     queue.wait();
 
-    // 2. Compute Cholesky factorization of G = U^T * U
-    Eigen::Map<Eigen::Matrix<T, bs, bs, Eigen::RowMajor>> RR(R.data);
-    Eigen::LLT<Eigen::Matrix<T, Eigen::Dynamic, Eigen::Dynamic>> llt(RR);
-    if (llt.info() != Eigen::Success) throw std::runtime_error("Cholesky factorization failed in orthonormalize");
-    RR = llt.matrixL().transpose();
-    auto stored_R = RR.eval();
+    if constexpr (bs == 1) {
+      R.data[0] = std::sqrt(R.data[0]);
+      std::for_each(V.data, V.data + V.rows() * bs, [&](auto& x) { x /= R.data[0]; });
+    }
+    else {
+      // 2. Compute Cholesky factorization of G = U^T * U
+      Eigen::Map<Eigen::Matrix<T, bs, bs, Eigen::RowMajor>> RR(R.data);
+      Eigen::LLT<Eigen::Matrix<T, Eigen::Dynamic, Eigen::Dynamic>> llt(RR);
+      if (llt.info() != Eigen::Success) throw std::runtime_error("Cholesky factorization failed in orthonormalize");
+      RR = llt.matrixL().transpose();
+      auto stored_R = RR.eval();
 
-    // 3. Compute U^{-1} and store in R temporarily
-    RR = stored_R.inverse().eval();
+      // 3. Compute U^{-1} and store in R temporarily
+      RR = stored_R.inverse().eval();
 
-    auto Vtemp0 = Vtemp->block_view(0);
-    V.mult(R, Vtemp0); // V_temp = V * U^{-1}
-    V.copy_from(Vtemp0);
-    queue.wait(); // Ensure copy completes
+      auto Vtemp0 = Vtemp->block_view(0);
+      V.mult(R, Vtemp0); // V_temp = V * U^{-1}
+      V.copy_from(Vtemp0);
+      queue.wait(); // Ensure copy completes
 
-    // 4. Restore U in R (the Cholesky factor, not its inverse)
-    RR = stored_R;
+      // 4. Restore U in R (the Cholesky factor, not its inverse)
+      RR = stored_R;
+    }
   }
 
   auto create_multivector(Index rows, Index cols) { return BlockMultivector(queue, rows, cols); }
@@ -81,7 +84,8 @@ public:
     return data;
   }
 
-  std::size_t solve_small_dense(const typename BlockMultivector::BlockMatrix& B, typename BlockMultivector::BlockMatrix::BlockView beta, std::size_t nev)
+  std::size_t solve_small_dense(const typename BlockMultivector::BlockMatrix& B, typename BlockMultivector::BlockMatrix::BlockView beta,
+                                std::size_t nev)
   {
     queue.wait();
 
@@ -103,18 +107,13 @@ public:
       throw std::runtime_error("Eigendecomposition failed");
     }
 
-    // Get the eigenvalues from Eigen (in ascending order by default)
-    // For Descending order (e.g., shift-invert), reverse to get largest first
+    // Get the eigenvalues from Eigen
+    std::vector<unsigned int> indices(n);
+    std::iota(indices.begin(), indices.end(), 0);
+    std::sort(indices.begin(), indices.end(),
+              [&](const auto& i, const auto& j) { return std::abs(solver.eigenvalues()[i]) > std::abs(solver.eigenvalues()[j]); });
     if (eigenvalues == nullptr) eigenvalues = sycl::malloc_shared<T>(n, queue);
-
-    if (eigenvalue_order_ == EigenvalueOrder::Descending) {
-      // Reverse order: largest eigenvalues first
-      for (std::size_t i = 0; i < n; ++i) eigenvalues[i] = solver.eigenvalues()(n - 1 - i);
-    }
-    else {
-      // Ascending order: smallest eigenvalues first (default)
-      for (std::size_t i = 0; i < n; ++i) eigenvalues[i] = solver.eigenvalues()(i);
-    }
+    for (std::size_t i = 0; i < n; ++i) eigenvalues[i] = solver.eigenvalues()(indices[i]);
 
     // Store eigenvectors in BlockMatrix format
     if (!eigenvectors) {
@@ -124,19 +123,8 @@ public:
     for (std::size_t i = 0; i < B.block_rows(); ++i) {
       for (std::size_t j = 0; j < B.block_cols(); ++j) {
         auto block = eigenvectors->block_view(i, j);
-        const std::size_t n_cols = B.block_cols() * bs;
-        for (unsigned int bi = 0; bi < bs; ++bi) {
-          for (unsigned int bj = 0; bj < bs; ++bj) {
-            if (eigenvalue_order_ == EigenvalueOrder::Descending) {
-              // Reverse the column order for descending
-              block(bi, bj) = solver.eigenvectors()(i * bs + bi, n_cols - 1 - (j * bs + bj));
-            }
-            else {
-              // Normal order for ascending
-              block(bi, bj) = solver.eigenvectors()(i * bs + bi, j * bs + bj);
-            }
-          }
-        }
+        for (unsigned int bi = 0; bi < bs; ++bi)
+          for (unsigned int bj = 0; bj < bs; ++bj) block(bi, bj) = solver.eigenvectors()(i * bs + bi, indices[j * bs + bj]);
       }
     }
 
@@ -164,10 +152,10 @@ public:
     const std::size_t n_eigs = eigenvectors->block_cols() * bs;
     const std::size_t n_check = std::min<std::size_t>(nev, n_eigs);
     std::size_t n_converged = 0;
-    std::cout << "  Residual norms: \n";
+    std::cout << "  Eigenvalues (Residual norms): \n";
     for (std::size_t j = 0; j < n_check; ++j) {
       T residual_norm = compute_norm(j);
-      if (j < 16) std::cout << "    Eigenvalue " << j << ": " << residual_norm << "\n";
+      if (j < 16) std::cout << "    Eigenvalue " << j << ": " << eigenvalues[j] << "(" << residual_norm << ")\n";
       if (residual_norm < tolerance_) n_converged++;
     }
 
@@ -176,7 +164,10 @@ public:
     return n_converged;
   }
 
-  std::span<T, std::dynamic_extent> get_current_eigenvalues() const { return std::span<T, std::dynamic_extent>(eigenvalues, eigenvectors->block_rows() * bs); }
+  std::span<T, std::dynamic_extent> get_current_eigenvalues() const
+  {
+    return std::span<T, std::dynamic_extent>(eigenvalues, eigenvectors->block_rows() * bs);
+  }
 
   const typename BlockMultivector::BlockMatrix& get_current_eigenvectors() const
   {

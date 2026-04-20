@@ -1,15 +1,15 @@
-#include <cmath>
-#include <iostream>
-#include <numeric>
-
-#include <trl/concepts.hh>
-#include <trl/eigensolvers/lanczos.hh>
-#include <trl/eigensolvers/params.hh>
-
 #include "../test_lanczos_convergence.hh"
+
 #include "sycl/diagonal.hh"
 #include "sycl/laplace.hh"
 #include "test_helper.hh"
+
+#include <cmath>
+#include <iostream>
+#include <numeric>
+#include <trl/concepts.hh>
+#include <trl/eigensolvers/lanczos.hh>
+#include <trl/eigensolvers/params.hh>
 
 template <class Scalar, unsigned int bs>
 bool run_test_diagonal(sycl::queue q)
@@ -65,7 +65,7 @@ int main()
 
   int num_failed = 0;
 
-  sycl::queue q{sycl::property::queue::in_order{}};
+  sycl::queue q{{sycl::property::queue::in_order{}, sycl::property::queue::AdaptiveCpp_coarse_grained_events{}}};
 
   std::cout << "\n--- Diagonal Eigenvalue Problem ---\n";
   if (!run_test_diagonal<double, 1>(q)) num_failed++;

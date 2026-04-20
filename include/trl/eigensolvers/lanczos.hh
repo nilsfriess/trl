@@ -43,8 +43,9 @@ public:
     // The maximum number of orthogonal vectors is evp->size()
     // We need ncv + blocksize vectors (ncv blocks plus one trailing block)
     if (ncv + blocksize > evp->size()) {
-      throw std::invalid_argument("ncv (" + std::to_string(ncv) + ") + blocksize (" + std::to_string(blocksize) + ") exceeds problem dimension (" + std::to_string(evp->size()) +
-                                  "). Krylov subspace would be exhausted. Reduce ncv to at most " + std::to_string(evp->size() - blocksize) + ".");
+      throw std::invalid_argument("ncv (" + std::to_string(ncv) + ") + blocksize (" + std::to_string(blocksize) + ") exceeds problem dimension (" +
+                                  std::to_string(evp->size()) + "). Krylov subspace would be exhausted. Reduce ncv to at most " +
+                                  std::to_string(evp->size() - blocksize) + ".");
     }
 
     if (nev >= ncv) throw std::invalid_argument("nev must be strictly smaller than ncv");
@@ -53,7 +54,8 @@ public:
     // After restart, we keep k_restart = nev/blocksize + 1 blocks, and need at least 1 more to extend
     unsigned int min_ncv_blocks = nev / blocksize + 2;
     if (ncv / blocksize < min_ncv_blocks) {
-      throw std::invalid_argument("ncv (" + std::to_string(ncv) + ") is too small for thick restart with nev=" + std::to_string(nev) + " and blocksize=" + std::to_string(blocksize) +
+      throw std::invalid_argument("ncv (" + std::to_string(ncv) + ") is too small for thick restart with nev=" + std::to_string(nev) +
+                                  " and blocksize=" + std::to_string(blocksize) +
                                   ". Minimum required: ncv >= " + std::to_string(min_ncv_blocks * blocksize) + ".");
     }
 
@@ -74,7 +76,6 @@ public:
     auto beta = B.block_view(0, 0);
 
     while (result.iterations < max_restarts) {
-      // std::cout << "Restart iteration " << result.iterations << " (k=" << k << ", nev/bs=" << nev / blocksize << ", ncv/bs=" << ncv / blocksize << ")\n";
       result.iterations++;
 
       // Extend the basis to the maximum allowed size. In the first iteration, k = 0 so here
@@ -83,24 +84,15 @@ public:
       result.n_op_apply += extend(k, ncv / blocksize);
 
       // Solve the small projected system
-      auto converged = evp->solve_small_dense(T, beta, nev);
-      if (converged >= nev) {
+      auto n_converged = evp->solve_small_dense(T, beta, nev);
+      if (n_converged >= nev) {
         result.converged = true;
         return result;
-      }
-      else {
-        // std::cout << "  Eigenvalues converged: " << converged << "\n";
       }
 
       // We did not converge yet, so now we must prepare for restart. We begin by computing
       // the Ritz vectors that we will keep.
       auto k_restart = nev / blocksize + 1;
-
-      // Check if we have enough space for restart
-      if (k_restart >= ncv / blocksize) {
-        // Not enough space to restart - return with partial convergence
-        break;
-      }
 
       const auto& Y = evp->get_current_eigenvectors();
       for (std::size_t j = 0; j < k_restart; ++j) {
@@ -109,7 +101,8 @@ public:
         for (std::size_t i = 0; i < ncv / blocksize; ++i) {
           auto Vi = V.block_view(i);
           auto Yij = Y.block_view(i, j);
-          Vi.mult_add(Yij, Wj);
+          // Vi.mult_add(Yij, Wj);
+          Wj.template gemm<false>(1., Vi, Yij, 1.);
         }
       }
       // Copy V_{m+1} to V_{k+1}
@@ -127,7 +120,6 @@ public:
 
           if (i == j) {
             const auto& evals = evp->get_eigenvalues_block(i);
-            // std::cout << "DEBUG restart: Setting T(" << i << "," << i << ") to eigenvalue " << evals.get_const_data()[0] << "\n";
             Tij.set_diagonal(evals);
           }
         }
@@ -157,23 +149,25 @@ public:
       auto Tkk = T.block_view(k, k);
       evp->dot(Vk, Vk1, Tkk);
 
-      auto W0 = W.block_view(0);    // temp storage
+      // auto W0 = W.block_view(0);    // temp storage
       auto Z0 = B.block_view(0, 1); // temp storage
-      Vk.mult(Tkk, W0);
-      Vk1 -= W0;
+      // Vk.mult(Tkk, W0);
+      // Vk1 -= W0;
+      Vk1.template gemm<false>(-1., Vk, Tkk, 1.);
 
       // Subtract the contribution from V_{k-1} * beta_{k-1}^T
       if (k > 0) {
         auto Vk_prev = V.block_view(k - 1);
         auto beta_prev = T.block_view(k, k - 1);
-        Vk_prev.mult_transpose(beta_prev, W0);
-        Vk1 -= W0;
+        // Vk_prev.mult_transpose(beta_prev, W0);
+        // Vk1 -= W0;
+        Vk1.template gemm<true>(-1., Vk_prev, beta_prev, 1.);
       }
 
       // Reorthogonalise against all previous blocks
       reorthogonalize_against(Vk1, k + 1, Z0);
 
-      // Step 6: Orthonormalize V_{i+1} to get beta_i (Cholesky factor) and V_{i+1}
+      // Step 6: Orthonormalize V_{i+1} to get beta_i and V_{i+1}
       evp->orthonormalize(Vk1, beta);
 
       // Store beta in the block tridiagonal matrix T
@@ -231,7 +225,7 @@ public:
 
     unsigned int n_op_apply = 0;
 
-    auto W0 = W.block_view(0);
+    // auto W0 = W.block_view(0);
     auto beta = B.block_view(0, 0);
     auto Z0 = B.block_view(0, 1); // temp storage
 
@@ -252,8 +246,9 @@ public:
       // Step 2: v_{i+1} -= v_{i-1} * beta_{i-1}^T
       if (i > 0) {
         auto V_prev = V.block_view(i - 1);
-        V_prev.mult_transpose(beta, W0);
-        V_next -= W0;
+        // V_prev.mult_transpose(beta, W0);
+        // V_next -= W0;
+        V_next.template gemm<true>(-1., V_prev, beta, 1.);
       }
 
       // Step 3: Compute T(i,i) = <v_i, v_{i+1}>
@@ -261,8 +256,9 @@ public:
       evp->dot(V_curr, V_next, Tii);
 
       // Step 4: Orthogonalise v_{i+1} -= v_i * T(i,i)
-      V_curr.mult(Tii, W0);
-      V_next -= W0;
+      // V_curr.mult(Tii, W0);
+      // V_next -= W0;
+      V_next.template gemm<false>(-1., V_curr, Tii, 1.);
 
       // Step 5: Full reorthogonalization
       reorthogonalize_against(V_next, i + 1, Z0);
@@ -308,6 +304,9 @@ private:
 
   Reorth reorth_{};
 
-  void reorthogonalize_against(typename BMV::BlockView V_next, unsigned int count, typename BMV::BlockMatrix::BlockView tmp) { reorth_(*evp, V, count, V_next, tmp); }
+  void reorthogonalize_against(typename BMV::BlockView V_next, unsigned int count, typename BMV::BlockMatrix::BlockView tmp)
+  {
+    reorth_(*evp, V, count, V_next, tmp);
+  }
 };
 } // namespace trl
