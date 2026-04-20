@@ -19,6 +19,11 @@ if(${WITH_SYCL_BACKEND})
   target_include_directories(benchmarks_sycl PRIVATE ../../include ${CMAKE_BINARY_DIR}/_deps/spectra-src/include)
   target_link_libraries(benchmarks_sycl PRIVATE trl::trl Spectra)
   add_sycl_to_target(TARGET benchmarks_sycl)
+
+  add_executable(blockview_benchmarks_sycl blockview_benchmarks.cc)
+  target_include_directories(blockview_benchmarks_sycl PRIVATE ../../include)
+  target_link_libraries(blockview_benchmarks_sycl PRIVATE trl::trl)
+  add_sycl_to_target(TARGET blockview_benchmarks_sycl)
   
   # target_link_libraries(laplace_example_sycl PRIVATE ONEMATH::onemath)
   # add_sycl_to_target(TARGET laplace_example_sycl SOURCES sycl/laplace.cc)
