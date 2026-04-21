@@ -4,7 +4,6 @@
 
 #include <algorithm>
 #include <fstream>
-#include <limits>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -114,6 +113,10 @@ inline CSRMatrix load_matrix_market(const std::string& filepath, sycl::queue& qu
     matrix.values[pos] = coo_vals[i];
   }
 
+  queue.wait();
+  queue.prefetch(matrix.row_offsets, (num_rows + 1) * sizeof(int));
+  queue.prefetch(matrix.col_indices, num_nonzeros * sizeof(int));
+  queue.prefetch(matrix.values, num_nonzeros * sizeof(double));
   queue.wait();
 
   return matrix;

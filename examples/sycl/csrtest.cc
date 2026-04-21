@@ -22,6 +22,9 @@ int main(int argc, char* argv[])
       argv,
       [&](const std::string& matrix_file) { return std::make_shared<EVP>(queue, matrix_file); },
       [&]() { std::cout << "SYCL device: " << queue.get_device().get_info<sycl::info::device::name>() << "\n\n"; },
-      [](auto V0, auto& rng, auto& dist) { std::generate_n(V0.data, V0.rows() * V0.cols(), [&]() { return dist(rng); }); },
+      [&](auto V0, auto& rng, auto& dist) {
+        std::generate_n(V0.data, V0.rows() * V0.cols(), [&]() { return dist(rng); });
+        queue.prefetch(V0.data, V0.rows() * V0.cols() * sizeof(double));
+      },
       [&]() { queue.wait(); });
 }
