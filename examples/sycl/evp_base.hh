@@ -28,10 +28,7 @@ public:
     if (N > 0) Vtemp.emplace(create_multivector(N, bs));
   }
 
-  virtual ~StandardEVPBase()
-  {
-    if (eigenvalues) sycl::free(eigenvalues, queue);
-  }
+  virtual ~StandardEVPBase() = default;
 
   virtual void apply(BlockView X, BlockView Y) = 0;
 
@@ -44,6 +41,7 @@ public:
     queue.wait();
 
     if constexpr (bs == 1) {
+      // TODO: Keep the bs==1 normalization on the device to avoid host touches on shared USM.
       R.data[0] = std::sqrt(R.data[0]);
       std::for_each(V.data, V.data + V.rows() * bs, [&](auto& x) { x /= R.data[0]; });
     }
@@ -55,13 +53,15 @@ public:
       RR = llt.matrixL().transpose();
       auto stored_R = RR.eval();
 
-      // 3. Compute U^{-1} and store in R temporarily
-      RR = stored_R.inverse().eval();
+      // 3. Compute U^{-1} via a triangular solve and store it in R temporarily.
+      Eigen::Matrix<T, bs, bs, Eigen::RowMajor> inv_R = Eigen::Matrix<T, bs, bs, Eigen::RowMajor>::Identity();
+      stored_R.template triangularView<Eigen::Upper>().solveInPlace(inv_R);
+      RR = inv_R;
 
       auto Vtemp0 = Vtemp->block_view(0);
       Vtemp0.template gemm<false>(1., V, R, 0.); // V_temp = V * U^{-1}
       V.copy_from(Vtemp0);
-      queue.wait(); // Ensure copy completes
+      queue.wait(); // Ensure the GEMM/copy finished before restoring R on the host.
 
       // 4. Restore U in R (the Cholesky factor, not its inverse)
       RR = stored_R;
@@ -113,44 +113,27 @@ public:
     std::iota(indices.begin(), indices.end(), 0);
     std::sort(indices.begin(), indices.end(),
               [&](const auto& i, const auto& j) { return std::abs(solver.eigenvalues()[i]) > std::abs(solver.eigenvalues()[j]); });
-    if (eigenvalues == nullptr) eigenvalues = sycl::malloc_shared<T>(n, queue);
+    eigenvalues.resize(n);
     for (std::size_t i = 0; i < n; ++i) eigenvalues[i] = solver.eigenvalues()(indices[i]);
 
-    // Store eigenvectors in BlockMatrix format
-    if (!eigenvectors) {
-      eigenvectors = std::make_unique<typename BlockMultivector::BlockMatrix>(create_blockmatrix(B.block_rows(), B.block_cols()));
-      queue.wait();
-    }
-    for (std::size_t i = 0; i < B.block_rows(); ++i) {
-      for (std::size_t j = 0; j < B.block_cols(); ++j) {
-        auto block = eigenvectors->block_view(i, j);
-        for (unsigned int bi = 0; bi < bs; ++bi)
-          for (unsigned int bj = 0; bj < bs; ++bj) block(bi, bj) = solver.eigenvectors()(i * bs + bi, indices[j * bs + bj]);
-      }
-    }
+    const auto& ritz_vectors = solver.eigenvectors();
 
-    // Compute the residual norms and return the number of converged eigenvalues
+    // Compute the residual norms directly from Eigen's host-side Ritz vectors.
     const auto compute_norm = [&](std::size_t col_idx) -> T {
-      // Compute ||beta * v_j||_2 where v_j are the last bs components of eigenvector col_idx
-      // The last block row contains the last bs components
-      const std::size_t last_block_row = eigenvectors->block_rows() - 1;
-      auto v_last = eigenvectors->block_view(last_block_row, col_idx / bs);
+      const std::size_t last_block_row = B.block_rows() - 1;
+      const std::size_t eigvec_col = indices[col_idx];
 
-      // Extract the column within the block
-      const std::size_t col_in_block = col_idx % bs;
-
-      // Compute beta * v_j (where v_j is a column vector of size bs)
       T norm_sq = 0.0;
       for (unsigned int i = 0; i < bs; ++i) {
         T sum = 0.0;
-        for (unsigned int k = 0; k < bs; ++k) sum += beta(i, k) * v_last(k, col_in_block);
+        for (unsigned int k = 0; k < bs; ++k) sum += beta(i, k) * ritz_vectors(last_block_row * bs + k, eigvec_col);
         norm_sq += sum * sum;
       }
       return std::sqrt(norm_sq);
     };
 
     // Count converged eigenvalues using the same relative residual criterion as OpenMP.
-    const std::size_t n_eigs = eigenvectors->block_cols() * bs;
+    const std::size_t n_eigs = B.block_cols() * bs;
     const std::size_t n_check = std::min<std::size_t>(nev, n_eigs);
     std::size_t n_converged = 0;
     const T eps = std::numeric_limits<T>::epsilon();
@@ -164,14 +147,26 @@ public:
       if (rel_residual < tolerance_) n_converged++;
     }
 
-    queue.wait();
+    // Only materialize Ritz vectors in backend storage if the caller will restart.
+    if (n_converged < nev) {
+      if (!eigenvectors || eigenvectors->block_rows() != B.block_rows() || eigenvectors->block_cols() != B.block_cols())
+        eigenvectors = std::make_unique<typename BlockMultivector::BlockMatrix>(create_blockmatrix(B.block_rows(), B.block_cols()));
+
+      for (std::size_t i = 0; i < B.block_rows(); ++i) {
+        for (std::size_t j = 0; j < B.block_cols(); ++j) {
+          auto block = eigenvectors->block_view(i, j);
+          for (unsigned int bi = 0; bi < bs; ++bi)
+            for (unsigned int bj = 0; bj < bs; ++bj) block(bi, bj) = ritz_vectors(i * bs + bi, indices[j * bs + bj]);
+        }
+      }
+    }
 
     return n_converged;
   }
 
-  std::span<T, std::dynamic_extent> get_current_eigenvalues() const
+  std::span<const T, std::dynamic_extent> get_current_eigenvalues() const
   {
-    return std::span<T, std::dynamic_extent>(eigenvalues, eigenvectors->block_rows() * bs);
+    return std::span<const T, std::dynamic_extent>(eigenvalues.data(), eigenvalues.size());
   }
 
   const typename BlockMultivector::BlockMatrix& get_current_eigenvectors() const
@@ -182,7 +177,7 @@ public:
 
   std::span<T, blocksize> get_eigenvalues_block(std::size_t block)
   {
-    std::span<T, blocksize> ev_block(eigenvalues + block * blocksize, blocksize);
+    std::span<T, blocksize> ev_block(eigenvalues.data() + block * blocksize, blocksize);
     return ev_block;
   }
 
@@ -212,7 +207,7 @@ protected:
 
   std::optional<BlockMultivector> Vtemp;
 
-  // Eigenvectors and eigenvalues
-  T* eigenvalues = nullptr;
+  // Eigenvectors live in backend storage for restart operations; eigenvalues stay on the host.
+  std::vector<T> eigenvalues;
   std::unique_ptr<typename BlockMultivector::BlockMatrix> eigenvectors;
 };

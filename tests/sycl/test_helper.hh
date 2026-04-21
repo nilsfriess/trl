@@ -38,7 +38,7 @@ public:
     return host_data;
   }
 
-  std::vector<typename EVP::Scalar> to_host_data(std::span<typename EVP::Scalar, std::dynamic_extent> data)
+  std::vector<typename EVP::Scalar> to_host_data(std::span<const typename EVP::Scalar, std::dynamic_extent> data)
   {
     sync();
     std::vector<typename EVP::Scalar> host_data(data.size());
