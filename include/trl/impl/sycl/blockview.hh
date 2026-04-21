@@ -136,40 +136,11 @@ public:
     });
   }
 
-  // C = this * B
-  void mult(MatrixBlockView B, BlockView C)
-  {
-    const auto n = rows();
-    const auto global_size = global_size_;
-
-    q->submit([&](auto& cgh) {
-      auto* a = data;
-      auto* b = B.data;
-      auto* c = C.data;
-
-      cgh.parallel_for(::sycl::range{global_size}, [=](::sycl::id<1> id) {
-        for (std::size_t tid = id[0]; tid < n; tid += global_size) {
-          T a_private[cols_];
-          for (std::size_t i = 0; i < cols_; ++i) a_private[i] = a[tid * cols_ + i];
-
-          T c_private[cols_];
-          for (std::size_t i = 0; i < cols_; ++i) {
-            T sum{0};
-            for (std::size_t j = 0; j < cols_; ++j) sum += a_private[j] * b[j * cols_ + i];
-            c_private[i] = sum;
-          }
-
-          for (std::size_t i = 0; i < cols_; ++i) c[tid * cols_ + i] = c_private[i];
-        }
-      });
-    });
-  }
-
   // Implements
   //   this <- alpha * A * B + beta * this
   // or
   //   this <- alpha * A * B^T + beta * this,
-  // where A is a blockview of the same size as `this`, and B is a sqaure block matrix view.
+  // where A is a blockview of the same size as `this`, and B is a square block matrix view.
   //
   // Since alpha and beta are usually either 0, 1, or -1, we use AdaptiveCpp's sycl::specialized extension
   // so that the JIT compiler can optimise unnecessary computations away.
@@ -211,62 +182,6 @@ public:
     });
   }
 
-  void mult_add(MatrixBlockView B, BlockView C)
-  {
-    const auto n = rows();
-    const auto global_size = global_size_;
-
-    q->submit([&](auto& cgh) {
-      auto* a = data;
-      auto* b = B.data;
-      auto* c = C.data;
-
-      cgh.parallel_for(::sycl::range{global_size}, [=](::sycl::id<1> id) {
-        for (std::size_t tid = id[0]; tid < n; tid += global_size) {
-          T a_private[cols_];
-          for (std::size_t i = 0; i < cols_; ++i) a_private[i] = a[tid * cols_ + i];
-
-          T c_private[cols_];
-          for (std::size_t i = 0; i < cols_; ++i) {
-            T sum{0};
-            for (std::size_t j = 0; j < cols_; ++j) sum += a_private[j] * b[j * cols_ + i];
-            c_private[i] = sum;
-          }
-
-          for (std::size_t i = 0; i < cols_; ++i) c[tid * cols_ + i] += c_private[i];
-        }
-      });
-    });
-  }
-
-  void mult_transpose(MatrixBlockView B, BlockView C)
-  {
-    const auto n = rows();
-    const auto global_size = global_size_;
-
-    q->submit([&](auto& cgh) {
-      auto* a = data;
-      auto* b = B.data;
-      auto* c = C.data;
-
-      cgh.parallel_for(::sycl::range{global_size}, [=](::sycl::id<1> id) {
-        for (std::size_t tid = id[0]; tid < n; tid += global_size) {
-          T a_private[cols_];
-          for (std::size_t i = 0; i < cols_; ++i) a_private[i] = a[tid * cols_ + i];
-
-          T c_private[cols_];
-          for (std::size_t i = 0; i < cols_; ++i) {
-            T sum{0};
-            for (std::size_t j = 0; j < cols_; ++j) sum += a_private[j] * b[i * cols_ + j];
-            c_private[i] = sum;
-          }
-
-          for (std::size_t i = 0; i < cols_; ++i) c[tid * cols_ + i] = c_private[i];
-        }
-      });
-    });
-  }
-
   BlockView& operator-=(BlockView B)
   {
     const auto n = rows();
@@ -283,33 +198,6 @@ public:
     });
 
     return *this;
-  }
-
-  void subtract_product(BlockView B, MatrixBlockView C)
-  {
-    const std::size_t K = rows();
-    const std::size_t M = cols_;
-    const auto global_size = global_size_;
-
-    q->submit([&](::sycl::handler& cgh) {
-      auto* a = data; // this
-      auto* b = B.data;
-      auto* c = C.data;
-
-      cgh.parallel_for(::sycl::range<1>{global_size}, [=](::sycl::id<1> id) {
-        for (std::size_t k = id[0]; k < K; k += global_size) {
-          T brow[cols_];
-          for (std::size_t m = 0; m < M; ++m) brow[m] = b[k * M + m];
-
-          for (std::size_t n = 0; n < M; ++n) {
-            T sum = T(0);
-            for (std::size_t m = 0; m < M; ++m) sum += brow[m] * c[m * M + n];
-
-            a[k * M + n] -= sum;
-          }
-        }
-      });
-    });
   }
 
   T norm() const

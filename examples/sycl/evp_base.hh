@@ -58,7 +58,7 @@ public:
       RR = stored_R.inverse().eval();
 
       auto Vtemp0 = Vtemp->block_view(0);
-      V.mult(R, Vtemp0); // V_temp = V * U^{-1}
+      Vtemp0.template gemm<false>(1., V, R, 0.); // V_temp = V * U^{-1}
       V.copy_from(Vtemp0);
       queue.wait(); // Ensure copy completes
 

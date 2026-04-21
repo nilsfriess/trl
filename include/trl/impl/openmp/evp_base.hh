@@ -61,7 +61,7 @@ public:
 
       // 4. Compute V_new = V_old * U^{-1} using temporary to avoid aliasing
       auto Vtemp0 = Vtemp->block_view(0);
-      V.mult(R, Vtemp0);   // Vtemp = V * U^{-1}
+      Vtemp0.template gemm<false>(1., V, R, 0.); // Vtemp = V * U^{-1}
       V.copy_from(Vtemp0); // V = Vtemp
 
       // 5. Restore U in R (the Cholesky factor, not its inverse)

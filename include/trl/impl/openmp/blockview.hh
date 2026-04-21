@@ -73,35 +73,13 @@ public:
     return *this;
   }
 
-  /** @brief Computes matrix-block product and adds to result.
+  /** @brief General block GEMM update.
    *
-   *  Computes \f$ Y = Y + X W \f$ where X is this block view,
-   *  W is a small square block matrix, and Y is the output.
+   *  Computes \f$ C = \alpha A B + \beta C \f$ or
+   *  \f$ C = \alpha A B^T + \beta C \f$ depending on @p transposed.
    */
-  void mult_add(MatrixBlockView W, BlockView other)
-  {
-    // other += this * W
-#pragma omp parallel for
-    for (std::size_t k = 0; k < n_; ++k) {
-      alignas(64) std::array<ScalarT, block_size> tmp{};
-      for (std::size_t i = 0; i < block_size; ++i) {
-        ScalarT sum = 0;
-#pragma omp simd reduction(+ : sum)
-        for (std::size_t j = 0; j < block_size; ++j) sum += data_[k * block_size + j] * W.data_[j * block_size + i];
-        tmp[i] = sum;
-      }
-
-#pragma omp simd
-      for (std::size_t i = 0; i < block_size; ++i) other.data_[k * block_size + i] += tmp[i];
-    }
-  }
-
-  /** @brief Computes matrix-block product.
-   *
-   *  Computes \f$ Y = X W \f$ where X is this block view
-   *  and W is a small square block matrix.
-   */
-  void mult(MatrixBlockView W, BlockView other)
+  template <bool transposed>
+  void gemm(ScalarT alpha, BlockView A, MatrixBlockView B, ScalarT beta)
   {
 #pragma omp parallel for
     for (std::size_t k = 0; k < n_; ++k) {
@@ -109,34 +87,15 @@ public:
       for (std::size_t i = 0; i < block_size; ++i) {
         ScalarT sum = 0;
 #pragma omp simd reduction(+ : sum)
-        for (std::size_t j = 0; j < block_size; ++j) sum += data_[k * block_size + j] * W.data_[j * block_size + i];
+        for (std::size_t j = 0; j < block_size; ++j) {
+          if constexpr (transposed) sum += A.data_[k * block_size + j] * B.data_[i * block_size + j];
+          else sum += A.data_[k * block_size + j] * B.data_[j * block_size + i];
+        }
         tmp[i] = sum;
       }
 
 #pragma omp simd
-      for (std::size_t i = 0; i < block_size; ++i) other.data_[k * block_size + i] = tmp[i];
-    }
-  }
-
-  /** @brief Computes matrix-block product with transposed block matrix.
-   *
-   *  Computes \f$ Y = X W^T \f$ where X is this block view
-   *  and \f$ W^T \f$ is the transpose of the block matrix.
-   */
-  void mult_transpose(MatrixBlockView W, BlockView other)
-  {
-#pragma omp parallel for
-    for (std::size_t k = 0; k < n_; ++k) {
-      alignas(64) std::array<ScalarT, block_size> tmp{};
-      for (std::size_t i = 0; i < block_size; ++i) {
-        ScalarT sum = 0;
-#pragma omp simd reduction(+ : sum)
-        for (std::size_t j = 0; j < block_size; ++j) sum += data_[k * block_size + j] * W.data_[i * block_size + j];
-        tmp[i] = sum;
-      }
-
-#pragma omp simd
-      for (std::size_t i = 0; i < block_size; ++i) other.data_[k * block_size + i] = tmp[i];
+      for (std::size_t i = 0; i < block_size; ++i) data_[k * block_size + i] = alpha * tmp[i] + beta * data_[k * block_size + i];
     }
   }
 
@@ -178,25 +137,6 @@ public:
       for (std::size_t i = 0; i < block_size; ++i)
 #pragma omp simd
         for (std::size_t j = 0; j < block_size; ++j) R.data_[i * block_size + j] += data_[k * block_size + i] * other.data_[k * block_size + j];
-    }
-  }
-
-  /** @brief Subtracts a matrix-block product from this block view.
-   *
-   *  Computes \f$ X = X - Y R \f$ where X is this block view,
-   *  Y is another block view, and R is a small square block matrix.
-   */
-  void subtract_product(BlockView other, MatrixBlockView R)
-  {
-    // this -= other * R
-#pragma omp parallel for
-    for (std::size_t k = 0; k < n_; ++k) {
-      for (std::size_t i = 0; i < block_size; ++i) {
-        ScalarT sum = 0;
-#pragma omp simd reduction(+ : sum)
-        for (std::size_t j = 0; j < block_size; ++j) sum += other.data_[k * block_size + j] * R.data_[j * block_size + i];
-        data_[k * block_size + i] -= sum;
-      }
     }
   }
 

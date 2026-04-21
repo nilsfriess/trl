@@ -74,16 +74,13 @@ concept BlockMatrixConcept = requires(BM bm, std::size_t i, std::size_t j) {
  *  @par Requirements
  *  - set_zero, rows, cols, copy_from
  *  - operator-=: in-place subtraction
- *  - mult_add: other += this * W
- *  - mult: other = this * W
- *  - mult_transpose: other = this * W^T
- *  - subtract_product: this -= other * W
+ *  - gemm: this <- alpha * other * W + beta * this, with optional transpose of W
  *
  *  @par Notes
  *  Operations are expected to be dense, block-sized linear algebra kernels.
  */
 template <class BV>
-concept BlockVectorView = requires(BV bv, const BV& other, const BV::MatrixBlockView& W) {
+concept BlockVectorView = requires(BV bv, const BV& other, const typename BV::MatrixBlockView& W, typename BV::EntryType alpha, typename BV::EntryType beta) {
   typename BV::EntryType;
 
   { bv.set_zero() } -> std::same_as<void>;
@@ -96,13 +93,9 @@ concept BlockVectorView = requires(BV bv, const BV& other, const BV::MatrixBlock
 
   { bv -= other } -> std::same_as<BV&>;
 
-  { bv.mult_add(W, other) } -> std::same_as<void>;
+  { bv.template gemm<false>(alpha, other, W, beta) } -> std::same_as<void>;
 
-  { bv.mult(W, other) } -> std::same_as<void>;
-
-  { bv.mult_transpose(W, other) } -> std::same_as<void>;
-
-  { bv.subtract_product(other, W) } -> std::same_as<void>;
+  { bv.template gemm<true>(alpha, other, W, beta) } -> std::same_as<void>;
 };
 
 /** @brief Concept for block multivectors

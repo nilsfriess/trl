@@ -101,7 +101,6 @@ public:
         for (std::size_t i = 0; i < ncv / blocksize; ++i) {
           auto Vi = V.block_view(i);
           auto Yij = Y.block_view(i, j);
-          // Vi.mult_add(Yij, Wj);
           Wj.template gemm<false>(1., Vi, Yij, 1.);
         }
       }
@@ -149,18 +148,13 @@ public:
       auto Tkk = T.block_view(k, k);
       evp->dot(Vk, Vk1, Tkk);
 
-      // auto W0 = W.block_view(0);    // temp storage
       auto Z0 = B.block_view(0, 1); // temp storage
-      // Vk.mult(Tkk, W0);
-      // Vk1 -= W0;
       Vk1.template gemm<false>(-1., Vk, Tkk, 1.);
 
       // Subtract the contribution from V_{k-1} * beta_{k-1}^T
       if (k > 0) {
         auto Vk_prev = V.block_view(k - 1);
         auto beta_prev = T.block_view(k, k - 1);
-        // Vk_prev.mult_transpose(beta_prev, W0);
-        // Vk1 -= W0;
         Vk1.template gemm<true>(-1., Vk_prev, beta_prev, 1.);
       }
 
@@ -225,7 +219,6 @@ public:
 
     unsigned int n_op_apply = 0;
 
-    // auto W0 = W.block_view(0);
     auto beta = B.block_view(0, 0);
     auto Z0 = B.block_view(0, 1); // temp storage
 
@@ -246,8 +239,6 @@ public:
       // Step 2: v_{i+1} -= v_{i-1} * beta_{i-1}^T
       if (i > 0) {
         auto V_prev = V.block_view(i - 1);
-        // V_prev.mult_transpose(beta, W0);
-        // V_next -= W0;
         V_next.template gemm<true>(-1., V_prev, beta, 1.);
       }
 
@@ -256,8 +247,6 @@ public:
       evp->dot(V_curr, V_next, Tii);
 
       // Step 4: Orthogonalise v_{i+1} -= v_i * T(i,i)
-      // V_curr.mult(Tii, W0);
-      // V_next -= W0;
       V_next.template gemm<false>(-1., V_curr, Tii, 1.);
 
       // Step 5: Full reorthogonalization

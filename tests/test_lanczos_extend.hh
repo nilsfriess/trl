@@ -54,7 +54,7 @@ bool test_lanczos_extend(std::shared_ptr<EVP> evp, TestHelper& helper, typename 
       auto Tij = T.block_view(i, j);
       auto Vi = V.block_view(i);
 
-      Vi.mult_add(Tij, VTj);
+      VTj.template gemm<false>(1., Vi, Tij, 1.);
     }
   }
 
@@ -91,7 +91,7 @@ bool test_lanczos_extend(std::shared_ptr<EVP> evp, TestHelper& helper, typename 
 
   auto residual_term = evp->create_multivector(N, bs);
   auto residual_block = residual_term.block_view(0);
-  V_kplus1.mult(beta, residual_block);
+  residual_block.template gemm<false>(1., V_kplus1, beta, 0.);
 
   helper.sync(); // Wait for mult operation
 

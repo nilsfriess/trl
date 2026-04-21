@@ -16,7 +16,7 @@ struct ModifiedGS {
     for (unsigned int j = 0; j < count; ++j) {
       auto Vj = V.block_view(j);
       evp.dot(Vj, V_next, tmp);
-      V_next.subtract_product(Vj, tmp);
+      V_next.template gemm<false>(-1., Vj, tmp, 1.);
     }
   }
 };
