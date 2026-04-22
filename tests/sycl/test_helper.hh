@@ -41,7 +41,7 @@ public:
   {
     sync();
     std::vector<typename EVP::Scalar> host_data(B.rows * B.cols);
-    std::copy_n(B.data, host_data.size(), host_data.data());
+    queue.memcpy(host_data.data(), B.data, host_data.size() * sizeof(typename EVP::Scalar)).wait();
     return host_data;
   }
 

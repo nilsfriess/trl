@@ -41,9 +41,12 @@ public:
     queue.wait();
 
     if constexpr (bs == 1) {
-      // R.data is malloc_host: readable from CPU after queue.wait() above.
-      const T norm = std::sqrt(R.data[0]);
-      R.data[0] = norm; // store norm as the bs=1 "Cholesky factor"
+      // R.data is device memory; copy the single scalar to host to compute the norm.
+      T norm_sq;
+      queue.memcpy(&norm_sq, R.data, sizeof(T)).wait();
+      const T norm = std::sqrt(norm_sq);
+      // Write norm back as the bs=1 "Cholesky factor" (async; in-order queue)
+      queue.memcpy(R.data, &norm, sizeof(T));
       T* v_data = V.data;
       const std::size_t v_rows = V.rows();
       queue.parallel_for(sycl::range<1>{v_rows}, [=](sycl::id<1> idx) {
@@ -51,25 +54,31 @@ public:
       });
     }
     else {
-      // 2. Compute Cholesky factorization of G = U^T * U
-      Eigen::Map<Eigen::Matrix<T, bs, bs, Eigen::RowMajor>> RR(R.data);
+      // 2. Host-stage R (bs×bs), compute Cholesky, triangular solve, copy back.
+      T R_host[bs * bs];
+      queue.memcpy(R_host, R.data, bs * bs * sizeof(T)).wait();
+
+      Eigen::Map<Eigen::Matrix<T, bs, bs, Eigen::RowMajor>> RR(R_host);
       Eigen::LLT<Eigen::Matrix<T, Eigen::Dynamic, Eigen::Dynamic>> llt(RR);
       if (llt.info() != Eigen::Success) throw std::runtime_error("Cholesky factorization failed in orthonormalize");
       RR = llt.matrixL().transpose();
-      auto stored_R = RR.eval();
+      const Eigen::Matrix<T, bs, bs, Eigen::RowMajor> stored_R = RR;
 
       // 3. Compute U^{-1} via a triangular solve and store it in R temporarily.
       Eigen::Matrix<T, bs, bs, Eigen::RowMajor> inv_R = Eigen::Matrix<T, bs, bs, Eigen::RowMajor>::Identity();
       stored_R.template triangularView<Eigen::Upper>().solveInPlace(inv_R);
       RR = inv_R;
 
+      // Copy inv_R to device so the gemm can use it.
+      queue.memcpy(R.data, R_host, bs * bs * sizeof(T)).wait();
+
       auto Vtemp0 = Vtemp->block_view(0);
       Vtemp0.template gemm<false>(1., V, R, 0.); // V_temp = V * U^{-1}
       V.copy_from(Vtemp0);
-      queue.wait(); // Ensure the GEMM/copy finished before restoring R on the host.
+      queue.wait();
 
       // 4. Restore U in R (the Cholesky factor, not its inverse)
-      RR = stored_R;
+      queue.memcpy(R.data, stored_R.data(), bs * bs * sizeof(T));
     }
   }
 
@@ -96,15 +105,24 @@ public:
     queue.wait();
 
     const auto n = B.block_rows() * bs;
+
+    // Copy B matrix from device to host
+    const std::size_t B_total = B.block_rows() * B.block_cols() * bs * bs;
+    std::vector<T> B_host(B_total);
+    queue.memcpy(B_host.data(), B.data(), B_total * sizeof(T)).wait();
+
+    // Copy beta from device to host
+    T beta_host[bs * bs];
+    queue.memcpy(beta_host, beta.data, bs * bs * sizeof(T)).wait();
+
     Eigen::Matrix<T, Eigen::Dynamic, Eigen::Dynamic> B_dense(n, n);
 
-    for (std::size_t i = 0; i < B.block_rows(); ++i) {
-      for (std::size_t j = 0; j < B.block_cols(); ++j) {
-        auto block = B.block_view(i, j);
+    for (std::size_t i = 0; i < B.block_rows(); ++i)
+      for (std::size_t j = 0; j < B.block_cols(); ++j)
         for (unsigned int bi = 0; bi < bs; ++bi)
-          for (unsigned int bj = 0; bj < bs; ++bj) B_dense(i * bs + bi, j * bs + bj) = block(bi, bj);
-      }
-    }
+          for (unsigned int bj = 0; bj < bs; ++bj)
+            B_dense(i * bs + bi, j * bs + bj) =
+                B_host[(i * B.block_cols() + j) * bs * bs + bi * bs + bj];
 
     // Compute eigendecomposition
     Eigen::SelfAdjointEigenSolver<Eigen::Matrix<T, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>> solver(B_dense);
@@ -131,7 +149,7 @@ public:
       T norm_sq = 0.0;
       for (unsigned int i = 0; i < bs; ++i) {
         T sum = 0.0;
-        for (unsigned int k = 0; k < bs; ++k) sum += beta(i, k) * ritz_vectors(last_block_row * bs + k, eigvec_col);
+        for (unsigned int k = 0; k < bs; ++k) sum += beta_host[i * bs + k] * ritz_vectors(last_block_row * bs + k, eigvec_col);
         norm_sq += sum * sum;
       }
       return std::sqrt(norm_sq);
@@ -155,13 +173,16 @@ public:
       if (!eigenvectors || eigenvectors->block_rows() != B.block_rows() || eigenvectors->block_cols() != B.block_cols())
         eigenvectors = std::make_unique<typename BlockMultivector::BlockMatrix>(create_blockmatrix(B.block_rows(), B.block_cols()));
 
-      for (std::size_t i = 0; i < B.block_rows(); ++i) {
-        for (std::size_t j = 0; j < B.block_cols(); ++j) {
-          auto block = eigenvectors->block_view(i, j);
+      // Build eigenvector data in a host buffer, then copy to device in one shot.
+      std::vector<T> eig_host(B_total);
+      for (std::size_t i = 0; i < B.block_rows(); ++i)
+        for (std::size_t j = 0; j < B.block_cols(); ++j)
           for (unsigned int bi = 0; bi < bs; ++bi)
-            for (unsigned int bj = 0; bj < bs; ++bj) block(bi, bj) = ritz_vectors(i * bs + bi, indices[j * bs + bj]);
-        }
-      }
+            for (unsigned int bj = 0; bj < bs; ++bj)
+              eig_host[(i * B.block_cols() + j) * bs * bs + bi * bs + bj] =
+                  ritz_vectors(i * bs + bi, indices[j * bs + bj]);
+
+      queue.memcpy(eigenvectors->data(), eig_host.data(), B_total * sizeof(T)).wait();
     }
 
     return n_converged;
@@ -188,11 +209,11 @@ public:
   std::vector<T> two_norm_on_host(typename BlockMultivector::BlockMatrix::BlockView B)
   {
     queue.wait();
+    T B_host[bs * bs];
+    queue.memcpy(B_host, B.data, bs * bs * sizeof(T)).wait();
     std::vector<T> norms_host(bs, 0);
-
     for (std::size_t i = 0; i < bs; ++i)
-      for (std::size_t j = 0; j < bs; ++j) norms_host[j] += B(i, j) * B(i, j);
-
+      for (std::size_t j = 0; j < bs; ++j) norms_host[j] += B_host[i * bs + j] * B_host[i * bs + j];
     for (auto& n : norms_host) n = std::sqrt(n);
     return norms_host;
   }

@@ -28,7 +28,7 @@ public:
       , block_rows_(block_rows)
       , block_cols_(block_cols)
   {
-    data_ = ::sycl::malloc_host<T>(block_rows * block_cols * bs * bs, queue);
+    data_ = ::sycl::malloc_device<T>(block_rows * block_cols * bs * bs, queue);
     diag_scratch_ = ::sycl::malloc_device<T>(bs, queue);
     // Zero-initialize the matrix
     queue.memset(data_, 0, block_rows * block_cols * bs * bs * sizeof(T)).wait();
@@ -48,7 +48,7 @@ public:
       , block_rows_(other.block_rows_)
       , block_cols_(other.block_cols_)
   {
-    data_ = ::sycl::malloc_host<T>(block_rows_ * block_cols_ * bs * bs, queue);
+    data_ = ::sycl::malloc_device<T>(block_rows_ * block_cols_ * bs * bs, queue);
     diag_scratch_ = ::sycl::malloc_device<T>(bs, queue);
     queue.memcpy(data_, other.data_, block_rows_ * block_cols_ * bs * bs * sizeof(T)).wait();
   }
@@ -61,7 +61,7 @@ public:
       queue = other.queue;
       block_rows_ = other.block_rows_;
       block_cols_ = other.block_cols_;
-      data_ = ::sycl::malloc_host<T>(block_rows_ * block_cols_ * bs * bs, queue);
+      data_ = ::sycl::malloc_device<T>(block_rows_ * block_cols_ * bs * bs, queue);
       diag_scratch_ = ::sycl::malloc_device<T>(bs, queue);
       queue.memcpy(data_, other.data_, block_rows_ * block_cols_ * bs * bs * sizeof(T)).wait();
     }
@@ -121,7 +121,12 @@ public:
   void print(bool with_separator = true, bool scientific = true, int precision = 8, T tolerance = 1e-10) const
   {
     queue.wait();
-    
+
+    // Copy all data to host for reading
+    const std::size_t total = block_rows_ * block_cols_ * bs * bs;
+    std::vector<T> host(total);
+    queue.memcpy(host.data(), data_, total * sizeof(T)).wait();
+
     if (with_separator) {
       std::cout << "--------------------------------------------------\n";
       std::cout << "Block matrix of order " << block_rows_ << "x" << block_cols_ << "\n";
@@ -141,13 +146,12 @@ public:
       // Print each row of blocks
       for (std::size_t bi = 0; bi < bs; ++bi) {
         for (std::size_t j = 0; j < block_cols_; ++j) {
-          auto block = block_view(i, j);
-
           // Print vertical separator before block (except for first block)
           if (j > 0 && with_separator) std::cout << "|";
 
+          const std::size_t block_offset = (i * block_cols_ + j) * bs * bs;
           for (std::size_t bj = 0; bj < bs; ++bj) {
-            auto entry = block(bi, bj);
+            auto entry = host[block_offset + bi * bs + bj];
             if (std::abs(entry) < tolerance) std::cout << std::setw(field_width) << "*";
             else std::cout << std::setw(field_width) << entry;
             if (bj < bs - 1) std::cout << " ";
