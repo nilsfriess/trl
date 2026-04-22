@@ -15,6 +15,11 @@ if(${WITH_SYCL_BACKEND})
   target_link_libraries(csrtest_sycl PRIVATE trl::trl Spectra)
   add_sycl_to_target(TARGET csrtest_sycl)
 
+  add_executable(laptest_sycl laptest.cc)
+  target_include_directories(laptest_sycl PRIVATE ../../include ${CMAKE_BINARY_DIR}/_deps/spectra-src/include)
+  target_link_libraries(laptest_sycl PRIVATE trl::trl Spectra)
+  add_sycl_to_target(TARGET laptest_sycl)
+
   add_executable(benchmarks_sycl benchmarks.cc)
   target_include_directories(benchmarks_sycl PRIVATE ../../include ${CMAKE_BINARY_DIR}/_deps/spectra-src/include)
   target_link_libraries(benchmarks_sycl PRIVATE trl::trl Spectra)

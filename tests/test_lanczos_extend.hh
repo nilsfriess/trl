@@ -17,7 +17,7 @@ bool test_lanczos_extend(std::shared_ptr<EVP> evp, TestHelper& helper, typename 
   std::cout << "Testing Lanczos relation, type = " << trl::type_str<Scalar>() << ", N = " << N << ", bs = " << bs << ": " << std::flush;
 
   trl::EigensolverParams params{.nev = 8, .ncv = 32, .max_restarts = 1000};
-  trl::BlockLanczos lanczos(evp, params);
+  trl::BlockLanczos<EVP, trl::TwiceModifiedGS> lanczos(evp, params);
 
   helper.sync();
 

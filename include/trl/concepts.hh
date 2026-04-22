@@ -2,7 +2,6 @@
 
 #include <concepts>
 #include <span>
-#include <vector>
 
 namespace trl {
 

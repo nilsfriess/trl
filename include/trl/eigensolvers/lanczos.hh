@@ -8,6 +8,7 @@
 #include <cassert>
 #include <cmath>
 #include <memory>
+#include <vector>
 
 namespace trl {
 /** @brief Block Lanczos eigensolver with thick restart.
@@ -108,6 +109,24 @@ public:
       W.block_view(k_restart).copy_from(V.block_view(ncv / blocksize));
 
       std::swap(V, W);
+
+      // Re-orthonormalize the retained Ritz vectors.
+      //
+      // After forming W_j = V * Y_j, the new basis should be orthonormal because Y is
+      // orthogonal and V was orthonormal. In practice V accumulates small errors over
+      // ncv/blocksize Lanczos steps, so W_j is only approximately orthonormal. Without
+      // this step those errors compound across restarts and degrade convergence.
+      //
+      // Note: T[j,j] is set to the Ritz value below (not recomputed as a Rayleigh
+      // quotient), so it remains valid after this normalization.
+      {
+        auto Z_tmp = B.block_view(0, 1); // reuse existing temp block
+        evp->orthonormalize(V.block_view(0), Z_tmp);
+        for (unsigned int j = 1; j < k_restart; ++j) {
+          reorthogonalize_against(V.block_view(j), j, Z_tmp);
+          evp->orthonormalize(V.block_view(j), Z_tmp);
+        }
+      }
 
       // Reset convergence counter for the new basis
       nconv = 0;

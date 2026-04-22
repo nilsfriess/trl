@@ -137,13 +137,11 @@ public:
     const std::size_t n_check = std::min<std::size_t>(nev, n_eigs);
     std::size_t n_converged = 0;
     const T eps = std::numeric_limits<T>::epsilon();
-    std::cout << "  Eigenvalues (Residual norms): \n";
     for (std::size_t j = 0; j < n_check; ++j) {
       T residual_norm = compute_norm(j);
       const T theta = eigenvalues[j];
       const T denom = std::max(std::abs(theta), eps);
       const T rel_residual = residual_norm / denom;
-      if (j < 16) std::cout << "    Eigenvalue " << j << ": " << eigenvalues[j] << "(" << residual_norm << ")\n";
       if (rel_residual < tolerance_) n_converged++;
     }
 

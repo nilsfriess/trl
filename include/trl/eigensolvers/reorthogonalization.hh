@@ -21,6 +21,15 @@ struct ModifiedGS {
   }
 };
 
+struct TwiceModifiedGS {
+  template <typename EVP, typename BMV>
+  void operator()(EVP& evp, BMV& V, unsigned int count, typename BMV::BlockView V_next, typename BMV::BlockMatrix::BlockView tmp) const
+  {
+    ModifiedGS{}(evp, V, count, V_next, tmp);
+    ModifiedGS{}(evp, V, count, V_next, tmp);
+  }
+};
+
 /** @brief Concept for reorthogonalization strategies.
  *
  *  A strategy must be callable with (EVP&, BMV&, unsigned count, BlockView, BlockMatrixBlockView)

@@ -1,9 +1,7 @@
 #pragma once
 
 #include "blockmatrix.hh"
-#include "util.hh"
 
-#include <algorithm>
 #include <array>
 #include <cstddef>
 

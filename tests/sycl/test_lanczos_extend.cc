@@ -1,7 +1,7 @@
 #include <iostream>
 
 #include "../test_lanczos_extend.hh"
-#include "sycl/diagonal.hh"
+#include "sycl/laplace.hh"
 #include "test_helper.hh"
 
 #include <memory>
@@ -10,8 +10,9 @@
 template <class Scalar, unsigned int bs>
 bool run_test(sycl::queue q, bool verbose)
 {
-  const unsigned int N = 512;
-  using EVP = DiagonalEVP<Scalar, bs>;
+  const unsigned int N = 1000;
+  // using EVP = DiagonalEVP<Scalar, bs>;
+  using EVP = Laplace1DEVP<Scalar, bs>;
 
   auto evp = std::make_shared<EVP>(q, N);
   double tolerance = 1e-8;
