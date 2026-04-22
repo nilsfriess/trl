@@ -3,6 +3,7 @@
 #include <iostream>
 #include <memory>
 #include <random>
+#include <vector>
 #include <sycl/sycl.hpp>
 
 #include "laplace.hh"
@@ -47,7 +48,10 @@ int main()
   auto V0 = solver.initial_block();
   std::mt19937 rng(42);
   std::uniform_real_distribution<double> dist(-1.0, 1.0);
-  for (std::size_t i = 0; i < V0.rows() * V0.cols(); ++i) V0.data[i] = dist(rng);
+  const std::size_t v0_size = V0.rows() * V0.cols();
+  std::vector<double> v0_host(v0_size);
+  for (std::size_t i = 0; i < v0_size; ++i) v0_host[i] = dist(rng);
+  q.memcpy(V0.data, v0_host.data(), v0_size * sizeof(double)).wait();
 
   // Solve the eigenvalue problem
   std::cout << "Starting Block Lanczos iteration...\n\n";

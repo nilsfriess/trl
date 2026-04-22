@@ -9,22 +9,30 @@
 
 #include "../csrtest_common.hh"
 #include "csrevp.hh"
+#include "trl/impl/sycl/profiling.hh"
+
+#include <vector>
 
 constexpr unsigned int BLOCKSIZE = 4;
 
 int main(int argc, char* argv[])
 {
-  sycl::queue queue{sycl::property::queue::in_order{}};
+  sycl::queue queue{{sycl::property::queue::in_order{}, sycl::property::queue::enable_profiling{}}};
   using EVP = CSREVP<double, BLOCKSIZE>;
 
-  return run_csrtest<BLOCKSIZE>(
+  const int result = run_csrtest<BLOCKSIZE>(
       argc,
       argv,
       [&](const std::string& matrix_file) { return std::make_shared<EVP>(queue, matrix_file); },
       [&]() { std::cout << "SYCL device: " << queue.get_device().get_info<sycl::info::device::name>() << "\n\n"; },
       [&](auto V0, auto& rng, auto& dist) {
-        std::generate_n(V0.data, V0.rows() * V0.cols(), [&]() { return dist(rng); });
-        queue.prefetch(V0.data, V0.rows() * V0.cols() * sizeof(double));
+        const std::size_t n = V0.rows() * V0.cols();
+        std::vector<double> v0_host(n);
+        std::generate_n(v0_host.begin(), n, [&]() { return dist(rng); });
+        queue.memcpy(V0.data, v0_host.data(), n * sizeof(double)).wait();
       },
       [&]() { queue.wait(); });
+
+  trl::sycl::SyclProfiler::get().report();
+  return result;
 }

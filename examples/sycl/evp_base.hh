@@ -41,9 +41,14 @@ public:
     queue.wait();
 
     if constexpr (bs == 1) {
-      // TODO: Keep the bs==1 normalization on the device to avoid host touches on shared USM.
-      R.data[0] = std::sqrt(R.data[0]);
-      std::for_each(V.data, V.data + V.rows() * bs, [&](auto& x) { x /= R.data[0]; });
+      // R.data is malloc_host: readable from CPU after queue.wait() above.
+      const T norm = std::sqrt(R.data[0]);
+      R.data[0] = norm; // store norm as the bs=1 "Cholesky factor"
+      T* v_data = V.data;
+      const std::size_t v_rows = V.rows();
+      queue.parallel_for(sycl::range<1>{v_rows}, [=](sycl::id<1> idx) {
+        v_data[idx[0]] /= norm;
+      });
     }
     else {
       // 2. Compute Cholesky factorization of G = U^T * U

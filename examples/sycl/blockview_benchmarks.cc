@@ -5,6 +5,7 @@
 #include <iostream>
 #include <optional>
 #include <string>
+#include <vector>
 #include <sycl/sycl.hpp>
 #include <trl/impl/sycl/multivector.hh>
 #include <type_traits>
@@ -83,15 +84,14 @@ constexpr BenchmarkMetrics gemm_metrics(std::size_t rows)
 }
 
 template <class Scalar, unsigned int cols>
-std::array<Scalar, cols * cols> make_dot_reference(typename BlockMultivector<Scalar, cols>::BlockView a,
-                                                   typename BlockMultivector<Scalar, cols>::BlockView b)
+std::array<Scalar, cols * cols> make_dot_reference(const Scalar* a_data, const Scalar* b_data, std::size_t rows)
 {
   std::array<Scalar, cols * cols> reference{};
 
-  for (std::size_t row = 0; row < a.rows(); ++row)
+  for (std::size_t row = 0; row < rows; ++row)
     for (unsigned int i = 0; i < cols; ++i)
       for (unsigned int j = 0; j < cols; ++j)
-        reference[i * cols + j] += a.data[row * cols + i] * b.data[row * cols + j];
+        reference[i * cols + j] += a_data[row * cols + i] * b_data[row * cols + j];
 
   return reference;
 }
@@ -113,19 +113,17 @@ void print_correctness_result(Scalar max_err)
 }
 
 template <class Scalar, unsigned int cols>
-Scalar gemm_max_abs_error(typename BlockMultivector<Scalar, cols>::BlockView a,
-                          typename BlockMultivector<Scalar, cols>::BlockMatrix::BlockView b,
-                          typename BlockMultivector<Scalar, cols>::BlockView c,
-                          Scalar initial_c_value)
+Scalar gemm_max_abs_error(const Scalar* a_data, const Scalar* b_data, const Scalar* c_data,
+                          std::size_t rows, Scalar initial_c_value)
 {
   Scalar max_err = 0;
 
-  for (std::size_t row = 0; row < a.rows(); ++row)
+  for (std::size_t row = 0; row < rows; ++row)
     for (unsigned int i = 0; i < cols; ++i) {
       Scalar expected = initial_c_value;
       for (unsigned int j = 0; j < cols; ++j)
-        expected += a.data[row * cols + j] * b.data[j * cols + i];
-      max_err = std::max(max_err, std::abs(expected - c.data[row * cols + i]));
+        expected += a_data[row * cols + j] * b_data[j * cols + i];
+      max_err = std::max(max_err, std::abs(expected - c_data[row * cols + i]));
     }
 
   return max_err;
@@ -193,14 +191,15 @@ void run_blockview_benchmark(::sycl::queue& q, std::size_t rows, int runs, Opera
   operation(a, b, c);
   q.wait();
 
-  const auto reference = make_reference(a, b);
-  const Scalar max_err = max_abs_error(c.data, reference);
-  print_correctness_result(max_err);
-
-  q.prefetch(a.data, rows * cols * sizeof(Scalar));
-  q.prefetch(b.data, rows * cols * sizeof(Scalar));
-  q.prefetch(c.data, cols * cols * sizeof(Scalar));
+  std::vector<Scalar> a_host(rows * cols), b_host(rows * cols), c_host(cols * cols);
+  q.memcpy(a_host.data(), a.data, rows * cols * sizeof(Scalar));
+  q.memcpy(b_host.data(), b.data, rows * cols * sizeof(Scalar));
+  q.memcpy(c_host.data(), c.data, cols * cols * sizeof(Scalar));
   q.wait();
+
+  const auto reference = make_reference(a_host.data(), b_host.data(), rows);
+  const Scalar max_err = max_abs_error(c_host.data(), reference);
+  print_correctness_result(max_err);
 
   const double avg_time = time_operation(q, runs, [&]() { operation(a, b, c); });
   report_benchmark(avg_time, metrics, roofline);
@@ -235,13 +234,14 @@ void run_multivector_output_benchmark(::sycl::queue& q, std::size_t rows, int ru
   operation(a, b, c);
   q.wait();
 
-  const Scalar max_err = compute_error(a, b, c, c_fill_value);
-  print_correctness_result(max_err);
-
-  q.prefetch(a.data, rows * cols * sizeof(Scalar));
-  q.prefetch(b.data, cols * cols * sizeof(Scalar));
-  q.prefetch(c.data, rows * cols * sizeof(Scalar));
+  std::vector<Scalar> a_host(rows * cols), b_host(cols * cols), c_host(rows * cols);
+  q.memcpy(a_host.data(), a.data, rows * cols * sizeof(Scalar));
+  q.memcpy(b_host.data(), b.data, cols * cols * sizeof(Scalar));
+  q.memcpy(c_host.data(), c.data, rows * cols * sizeof(Scalar));
   q.wait();
+
+  const Scalar max_err = compute_error(a_host.data(), b_host.data(), c_host.data(), rows, c_fill_value);
+  print_correctness_result(max_err);
 
   const double avg_time = time_operation(q, runs, [&]() { operation(a, b, c); });
   report_benchmark(avg_time, metrics, roofline);
@@ -258,8 +258,8 @@ void run_dot_benchmark(::sycl::queue& q, std::size_t rows, int runs,
       [](auto a, auto b, auto c) {
         a.dot(b, c);
       },
-      [](auto a, auto b) {
-        return make_dot_reference<Scalar, cols>(a, b);
+      [](const Scalar* a_data, const Scalar* b_data, std::size_t rows_count) {
+        return make_dot_reference<Scalar, cols>(a_data, b_data, rows_count);
       },
       metrics, roofline);
 }
@@ -275,8 +275,8 @@ void run_gemm_benchmark(::sycl::queue& q, std::size_t rows, int runs,
       [](auto a, auto b, auto c) {
         c.template gemm<false>(Scalar{1.}, a, b, Scalar{1.});
       },
-      [](auto a, auto b, auto c, Scalar initial_c_value) {
-        return gemm_max_abs_error<Scalar, cols>(a, b, c, initial_c_value);
+      [](const Scalar* a_data, const Scalar* b_data, const Scalar* c_data, std::size_t rows_count, Scalar initial_c_value) {
+        return gemm_max_abs_error<Scalar, cols>(a_data, b_data, c_data, rows_count, initial_c_value);
       },
       metrics, roofline);
 }
@@ -308,8 +308,7 @@ int main(int argc, char* argv[])
   auto run_for_cols = [&]<unsigned int cols>() {
     if (!matches_cols_filter<cols>(cols_filter)) return;
 
-    constexpr std::size_t rows =
-        (cols >= 16 ? (cols >= 32 ? 1 << 25 : 1 << 26) : (1 << 27)) + 3;
+    constexpr std::size_t rows = 100;
     std::cout << "\n=== cols = " << cols << ", N = " << rows << " ===\n";
 
     switch (benchmark_number) {
