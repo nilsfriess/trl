@@ -36,6 +36,12 @@ if (${WITH_SYCL_BACKEND})
   target_compile_definitions(trl INTERFACE WITH_SYCL_BACKEND)
 endif()
 
+option(TRL_ENABLE_SYCL_PROFILING
+  "Enable SYCL backend profiling via sycl::event get_profiling_info (requires the queue to be created with sycl::property::queue::enable_profiling{})"
+  Off)
+if(TRL_ENABLE_SYCL_PROFILING)
+  target_compile_definitions(trl INTERFACE TRL_ENABLE_SYCL_PROFILING)
+endif()
 
 target_compile_features(trl INTERFACE cxx_std_20)
 

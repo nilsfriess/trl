@@ -1,6 +1,7 @@
 #pragma once
 
 #include "matrixblockview.hh"
+#include "profiling.hh"
 
 #include <cassert>
 #include <cstddef>
@@ -53,7 +54,10 @@ public:
   void copy_from(const BlockView& source)
   {
     assert(rows_ == source.rows_);
-    q->memcpy(data, source.data, rows_ * cols_ * sizeof(T));
+    static auto* ev = SyclProfiler::get().registerOrGetEvent(
+        SyclProfiler::get().registerOrGetFamily("BlockView"), "copy_from");
+    auto e = q->memcpy(data, source.data, rows_ * cols_ * sizeof(T));
+    SyclProfiler::get().pushEvent(ev, e);
   }
 
   template <bool transposed = true>
@@ -89,7 +93,9 @@ public:
       else return nidx * TN + tn;
     };
 
-    q->submit([&](auto& cgh) {
+    static auto* ev = SyclProfiler::get().registerOrGetEvent(
+        SyclProfiler::get().registerOrGetFamily("BlockView"), "dot");
+    auto e = q->submit([&](auto& cgh) {
       const auto* a = data;
       const auto* b = B.data;
       auto* c = C.data;
@@ -134,6 +140,7 @@ public:
           }
       });
     });
+    SyclProfiler::get().pushEvent(ev, e);
   }
 
   // Implements
@@ -154,7 +161,9 @@ public:
     const auto n = rows();
     const auto stride = global_size_;
 
-    q->submit([&](auto& cgh) {
+    static auto* ev = SyclProfiler::get().registerOrGetEvent(
+        SyclProfiler::get().registerOrGetFamily("BlockView"), "gemm");
+    auto e = q->submit([&](auto& cgh) {
       const auto* a = A.data;
       const auto* b = B.data;
       auto* c = data;
@@ -180,6 +189,7 @@ public:
         }
       });
     });
+    SyclProfiler::get().pushEvent(ev, e);
   }
 
   BlockView& operator-=(BlockView B)
@@ -187,7 +197,9 @@ public:
     const auto n = rows();
     const auto global_size = global_size_;
 
-    q->submit([&](auto& cgh) {
+    static auto* ev = SyclProfiler::get().registerOrGetEvent(
+        SyclProfiler::get().registerOrGetFamily("BlockView"), "operator-=");
+    auto e = q->submit([&](auto& cgh) {
       auto* a = data;
       auto* b = B.data;
 
@@ -196,6 +208,7 @@ public:
           for (std::size_t i = 0; i < cols_; ++i) a[tid * cols_ + i] -= b[tid * cols_ + i];
       });
     });
+    SyclProfiler::get().pushEvent(ev, e);
 
     return *this;
   }
@@ -207,7 +220,13 @@ public:
     return result;
   }
 
-  void set_zero() { q->memset(data, 0, rows_ * cols_ * sizeof(T)); }
+  void set_zero()
+  {
+    static auto* ev = SyclProfiler::get().registerOrGetEvent(
+        SyclProfiler::get().registerOrGetFamily("BlockView"), "set_zero");
+    auto e = q->memset(data, 0, rows_ * cols_ * sizeof(T));
+    SyclProfiler::get().pushEvent(ev, e);
+  }
 
   T& operator()(std::size_t row, std::size_t col)
   {

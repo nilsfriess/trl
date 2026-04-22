@@ -1,5 +1,7 @@
 #pragma once
 
+#include "profiling.hh"
+
 #include <cassert>
 #include <span>
 
@@ -31,36 +33,56 @@ public:
   MatrixBlockView& operator=(MatrixBlockView&&) = default;
   ~MatrixBlockView() = default;
 
-  void copy_from(const MatrixBlockView& source) { queue->memcpy(data, source.data, bs * bs * sizeof(T)); }
+  void copy_from(const MatrixBlockView& source)
+  {
+    static auto* ev = SyclProfiler::get().registerOrGetEvent(
+        SyclProfiler::get().registerOrGetFamily("MatrixBlockView"), "copy_from");
+    auto e = queue->memcpy(data, source.data, bs * bs * sizeof(T));
+    SyclProfiler::get().pushEvent(ev, e);
+  }
 
   void copy_from_transpose(const MatrixBlockView& source)
   {
+    static auto* ev = SyclProfiler::get().registerOrGetEvent(
+        SyclProfiler::get().registerOrGetFamily("MatrixBlockView"), "copy_from_transpose");
     T* dest_ptr = data;
     T* src_ptr = source.data;
-    queue->single_task([=]() {
+    auto e = queue->single_task([=]() {
       for (std::size_t i = 0; i < bs; ++i)
         for (std::size_t j = 0; j < bs; ++j) dest_ptr[i * bs + j] = src_ptr[j * bs + i];
     });
+    SyclProfiler::get().pushEvent(ev, e);
   }
 
-  void set_zero() { queue->memset(data, 0, bs * bs * sizeof(T)); }
+  void set_zero()
+  {
+    static auto* ev = SyclProfiler::get().registerOrGetEvent(
+        SyclProfiler::get().registerOrGetFamily("MatrixBlockView"), "set_zero");
+    auto e = queue->memset(data, 0, bs * bs * sizeof(T));
+    SyclProfiler::get().pushEvent(ev, e);
+  }
 
   void set_diagonal(std::span<T> values)
   {
+    static auto* ev = SyclProfiler::get().registerOrGetEvent(
+        SyclProfiler::get().registerOrGetFamily("MatrixBlockView"), "set_diagonal");
     queue->memcpy(diag_scratch, values.data(), bs * sizeof(T));
     T* dest_ptr = data;
     T* scratch = diag_scratch;
-    queue->single_task([=]() {
+    auto e = queue->single_task([=]() {
       for (std::size_t i = 0; i < bs; ++i) dest_ptr[i * bs + i] = scratch[i];
     });
+    SyclProfiler::get().pushEvent(ev, e);
   }
 
   void mult(MatrixBlockView B, MatrixBlockView C)
   {
+    static auto* ev = SyclProfiler::get().registerOrGetEvent(
+        SyclProfiler::get().registerOrGetFamily("MatrixBlockView"), "mult");
     T* a = data;
     T* b = B.data;
     T* c = C.data;
-    queue->single_task([=]() {
+    auto e = queue->single_task([=]() {
       for (std::size_t i = 0; i < bs; ++i)
         for (std::size_t j = 0; j < bs; ++j) {
           T sum = 0;
@@ -68,6 +90,7 @@ public:
           c[i * bs + j] = sum;
         }
     });
+    SyclProfiler::get().pushEvent(ev, e);
   }
 
   // Host-side element access; call queue->wait() before using after device ops.
