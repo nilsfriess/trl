@@ -67,9 +67,10 @@ int main(int argc, char* argv[])
   Spectra::SymEigsSolver<Op> eigs(op, nev, ncv);
   eigs.init();
 
+  double tolerance = 1e-5;
   std::cout << "Running Spectra (reference)...\n";
   const auto spectra_start = std::chrono::steady_clock::now();
-  eigs.compute();
+  eigs.compute(Spectra::SortRule::LargestMagn, 1000, tolerance);
   const auto spectra_end = std::chrono::steady_clock::now();
   const auto spectra_ms = std::chrono::duration_cast<std::chrono::milliseconds>(spectra_end - spectra_start).count();
   const auto spectra_its = eigs.num_iterations();
@@ -88,7 +89,7 @@ int main(int argc, char* argv[])
   using EVP = GradedTridiagEVP<double, BLOCKSIZE>;
   auto evp = std::make_shared<EVP>(queue, N);
 
-  trl::EigensolverParams params{.nev = nev, .ncv = ncv, .max_restarts = 1000, .tolerance = 1e-10};
+  trl::EigensolverParams params{.nev = nev, .ncv = ncv, .max_restarts = 1000, .tolerance = tolerance};
   trl::BlockLanczos<EVP, trl::TwiceModifiedGS> lanczos(evp, params);
 
   auto V0 = lanczos.initial_block();
