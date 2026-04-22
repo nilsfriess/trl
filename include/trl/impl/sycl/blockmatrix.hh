@@ -29,6 +29,7 @@ public:
       , block_cols_(block_cols)
   {
     data_ = ::sycl::malloc_shared<T>(block_rows * block_cols * bs * bs, queue);
+    diag_scratch_ = ::sycl::malloc_device<T>(bs, queue);
     // Zero-initialize the matrix
     queue.memset(data_, 0, block_rows * block_cols * bs * bs * sizeof(T)).wait();
   }
@@ -36,6 +37,9 @@ public:
   ~BlockMatrix() {
     if (data_) {
       ::sycl::free(data_, queue);
+    }
+    if (diag_scratch_) {
+      ::sycl::free(diag_scratch_, queue);
     }
   }
 
@@ -45,6 +49,7 @@ public:
       , block_cols_(other.block_cols_)
   {
     data_ = ::sycl::malloc_shared<T>(block_rows_ * block_cols_ * bs * bs, queue);
+    diag_scratch_ = ::sycl::malloc_device<T>(bs, queue);
     queue.memcpy(data_, other.data_, block_rows_ * block_cols_ * bs * bs * sizeof(T)).wait();
   }
 
@@ -52,10 +57,12 @@ public:
   {
     if (this != &other) {
       ::sycl::free(data_, queue);
+      ::sycl::free(diag_scratch_, queue);
       queue = other.queue;
       block_rows_ = other.block_rows_;
       block_cols_ = other.block_cols_;
       data_ = ::sycl::malloc_shared<T>(block_rows_ * block_cols_ * bs * bs, queue);
+      diag_scratch_ = ::sycl::malloc_device<T>(bs, queue);
       queue.memcpy(data_, other.data_, block_rows_ * block_cols_ * bs * bs * sizeof(T)).wait();
     }
     return *this;
@@ -66,8 +73,10 @@ public:
       , block_rows_(other.block_rows_)
       , block_cols_(other.block_cols_)
       , data_(other.data_)
+      , diag_scratch_(other.diag_scratch_)
   {
     other.data_ = nullptr;
+    other.diag_scratch_ = nullptr;
     other.block_rows_ = 0;
     other.block_cols_ = 0;
   }
@@ -76,11 +85,14 @@ public:
   {
     if (this != &other) {
       ::sycl::free(data_, queue);
+      ::sycl::free(diag_scratch_, queue);
       queue = std::move(other.queue);
       block_rows_ = other.block_rows_;
       block_cols_ = other.block_cols_;
       data_ = other.data_;
+      diag_scratch_ = other.diag_scratch_;
       other.data_ = nullptr;
+      other.diag_scratch_ = nullptr;
       other.block_rows_ = 0;
       other.block_cols_ = 0;
     }
@@ -95,7 +107,7 @@ public:
     assert(block_row < block_rows_);
     assert(block_col < block_cols_);
     const auto block_index = block_row * block_cols_ + block_col;
-    return BlockView(const_cast<::sycl::queue*>(&queue), data_ + block_index * bs * bs);
+    return BlockView(const_cast<::sycl::queue*>(&queue), data_ + block_index * bs * bs, diag_scratch_);
   }
 
   // Allow BlockMultivector to access data for optimized multiplication
@@ -172,6 +184,7 @@ private:
   std::size_t block_cols_;
 
   T* data_;
+  T* diag_scratch_ = nullptr;
 };
 
 } // namespace trl::sycl
