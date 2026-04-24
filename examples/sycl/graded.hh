@@ -1,8 +1,9 @@
 #pragma once
 
-#include <sycl/sycl.hpp>
-
 #include "evp_base.hh"
+
+#include <sycl/sycl.hpp>
+#include <trl/impl/sycl/profiling.hh>
 
 // Matrix-free "graded tridiagonal" EVP.
 //
@@ -34,15 +35,18 @@ public:
     T* Y_data = Y.data;
     const std::size_t N = this->N;
 
-    this->queue.parallel_for(sycl::range<1>(N), [=](sycl::id<1> idx) {
+    static auto* ev = trl::sycl::SyclProfiler::get().registerOrGetEvent(trl::sycl::SyclProfiler::get().registerOrGetFamily("EVP"), "apply");
+
+    auto e = this->queue.parallel_for(sycl::range<1>(N), [=](sycl::id<1> idx) {
       auto i = idx[0];
       for (std::size_t j = 0; j < bs; ++j) {
-        T diag = static_cast<T>(N - i);          // N, N-1, ..., 1
-        T val  = diag * X_data[i * bs + j];
-        if (i > 0)     val -= X_data[(i - 1) * bs + j];
+        T diag = static_cast<T>(N - i); // N, N-1, ..., 1
+        T val = diag * X_data[i * bs + j];
+        if (i > 0) val -= X_data[(i - 1) * bs + j];
         if (i < N - 1) val -= X_data[(i + 1) * bs + j];
         Y_data[i * bs + j] = val;
       }
     });
+    trl::sycl::SyclProfiler::get().pushEvent(ev, e);
   }
 };

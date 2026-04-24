@@ -1,5 +1,8 @@
 #pragma once
 
+#include <Eigen/Core>
+#include <Spectra/MatOp/SparseSymMatProd.h>
+#include <Spectra/SymEigsSolver.h>
 #include <chrono>
 #include <cstdlib>
 #include <iomanip>
@@ -7,13 +10,8 @@
 #include <random>
 #include <stdexcept>
 #include <string>
-
 #include <trl/eigensolvers/lanczos.hh>
 #include <trl/eigensolvers/params.hh>
-
-#include <Eigen/Core>
-#include <Spectra/MatOp/SparseSymMatProd.h>
-#include <Spectra/SymEigsSolver.h>
 #include <unsupported/Eigen/SparseExtra>
 #include <unsupported/Eigen/src/SparseExtra/MarketIO.h>
 
@@ -43,18 +41,21 @@ int run_csrtest(int argc, char* argv[], CreateEvp&& create_evp, PrintBackendInfo
     auto evp = create_evp(matrix_file);
     print_backend_info();
 
+    using EVP = std::decay_t<decltype(*evp)>;
+    using Scalar = typename EVP::Scalar;
+
     std::cout << "Matrix size: " << evp->size() << " x " << evp->size() << "\n\n";
 
-    trl::EigensolverParams params{.nev = nev, .ncv = ncv, .max_restarts = 1000, .tolerance = 1e-10};
+    trl::EigensolverParams params{.nev = nev, .ncv = ncv, .max_restarts = 1000, .tolerance = 1e-5};
 
-    Eigen::SparseMatrix<double> A;
+    Eigen::SparseMatrix<Scalar> A;
     Eigen::loadMarket(A, matrix_file);
 
-    using Op = Spectra::SparseSymMatProd<double>;
+    using Op = Spectra::SparseSymMatProd<Scalar>;
     Op op(A);
     constexpr std::size_t num_runs = 1;
 
-    Eigen::VectorXd spectra_eigenvalues;
+    Eigen::VectorX<Scalar> spectra_eigenvalues;
     std::chrono::duration<double, std::milli> spectra_total{0};
     for (std::size_t i = 0; i < num_runs; ++i) {
       Spectra::SymEigsSolver<Op> eigs(op, params.nev, params.ncv);
@@ -66,7 +67,8 @@ int run_csrtest(int argc, char* argv[], CreateEvp&& create_evp, PrintBackendInfo
       const auto end = std::chrono::steady_clock::now();
       const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
       spectra_total += elapsed;
-      std::cout << "Run " << i << ", took: " << elapsed.count() << "ms\n";
+      std::cout << "Run " << i << ", took: " << elapsed.count() << "ms (" << eigs.num_iterations() << " iterations, " << eigs.num_operations()
+                << " operator applications)\n";
 
       if (i + 1 == num_runs) {
         if (eigs.info() != Spectra::CompInfo::Successful) throw std::runtime_error("Spectra failed to converge");
@@ -81,7 +83,7 @@ int run_csrtest(int argc, char* argv[], CreateEvp&& create_evp, PrintBackendInfo
     std::chrono::duration<double, std::milli> lanczos_total{0};
     trl::EigensolverResult last_result{};
     for (std::size_t i = 0; i < num_runs; ++i) {
-      trl::BlockLanczos lanczos(evp, params);
+      trl::BlockLanczos<EVP, trl::TwiceModifiedGS> lanczos(evp, params);
 
       auto V0 = lanczos.initial_block();
       std::mt19937 rng(42);

@@ -3,25 +3,29 @@
 #include "evp_base.hh"
 
 #include <algorithm>
+#include <cusparse.h>
 #include <fstream>
 #include <sstream>
 #include <stdexcept>
 #include <string>
 #include <sycl/sycl.hpp>
+#include <trl/impl/sycl/profiling.hh>
 #include <vector>
 
 // CSR (Compressed Sparse Row) matrix storage
+template <class Scalar>
 struct CSRMatrix {
   int num_rows;
   int num_cols;
   int num_nonzeros;
   int* row_offsets; // size: num_rows + 1
   int* col_indices; // size: num_nonzeros
-  double* values;   // size: num_nonzeros
+  Scalar* values;   // size: num_nonzeros
 };
 
 // Read a Matrix Market file and assemble into CSR format using USM
-inline CSRMatrix load_matrix_market(const std::string& filepath, sycl::queue& queue)
+template <class Scalar>
+inline CSRMatrix<Scalar> load_matrix_market(const std::string& filepath, sycl::queue& queue)
 {
   std::ifstream file(filepath);
   if (!file) throw std::runtime_error("Error: cannot open file " + filepath);
@@ -55,7 +59,7 @@ inline CSRMatrix load_matrix_market(const std::string& filepath, sycl::queue& qu
   // (symmetric matrices need to add mirror entries for off-diagonal elements)
   std::vector<int> coo_rows;
   std::vector<int> coo_cols;
-  std::vector<double> coo_vals;
+  std::vector<Scalar> coo_vals;
 
   coo_rows.reserve(is_symmetric ? 2 * num_entries_in_file : num_entries_in_file);
   coo_cols.reserve(is_symmetric ? 2 * num_entries_in_file : num_entries_in_file);
@@ -63,7 +67,7 @@ inline CSRMatrix load_matrix_market(const std::string& filepath, sycl::queue& qu
 
   for (int i = 0; i < num_entries_in_file; i++) {
     int row, col;
-    double val;
+    Scalar val;
     file >> row >> col >> val;
     row--; // Convert 1-based to 0-based indexing
     col--;
@@ -82,48 +86,50 @@ inline CSRMatrix load_matrix_market(const std::string& filepath, sycl::queue& qu
 
   const int num_nonzeros = static_cast<int>(coo_rows.size());
 
-  // Allocate CSR arrays in unified shared memory
-  CSRMatrix matrix;
+  // Build CSR structure in host staging buffers
+  int* h_row_offsets = sycl::malloc_host<int>(num_rows + 1, queue);
+  int* h_col_indices = sycl::malloc_host<int>(num_nonzeros, queue);
+  Scalar* h_values = sycl::malloc_host<Scalar>(num_nonzeros, queue);
+
+  for (int i = 0; i <= num_rows; i++) h_row_offsets[i] = 0;
+  for (int i = 0; i < num_nonzeros; i++) h_row_offsets[coo_rows[i] + 1]++;
+  for (int i = 1; i <= num_rows; i++) h_row_offsets[i] += h_row_offsets[i - 1];
+
+  std::vector<int> insert_pos(h_row_offsets, h_row_offsets + num_rows);
+  for (int i = 0; i < num_nonzeros; i++) {
+    int row = coo_rows[i];
+    int pos = insert_pos[row]++;
+    h_col_indices[pos] = coo_cols[i];
+    h_values[pos] = coo_vals[i];
+  }
+
+  // Allocate device memory and upload
+  CSRMatrix<Scalar> matrix;
   matrix.num_rows = num_rows;
   matrix.num_cols = num_cols;
   matrix.num_nonzeros = num_nonzeros;
 
-  matrix.row_offsets = sycl::malloc_shared<int>(num_rows + 1, queue);
-  matrix.col_indices = sycl::malloc_shared<int>(num_nonzeros, queue);
-  matrix.values = sycl::malloc_shared<double>(num_nonzeros, queue);
+  matrix.row_offsets = sycl::malloc_device<int>(num_rows + 1, queue);
+  matrix.col_indices = sycl::malloc_device<int>(num_nonzeros, queue);
+  matrix.values = sycl::malloc_device<Scalar>(num_nonzeros, queue);
 
-  if (!matrix.row_offsets || !matrix.col_indices || !matrix.values) throw std::runtime_error("USM allocation failed");
+  if (!matrix.row_offsets || !matrix.col_indices || !matrix.values) throw std::runtime_error("Device USM allocation failed");
 
-  // Initialize row_offsets with zeros for counting
-  for (int i = 0; i <= num_rows; i++) matrix.row_offsets[i] = 0;
-
-  // Count entries per row
-  for (int i = 0; i < num_nonzeros; i++) matrix.row_offsets[coo_rows[i] + 1]++;
-
-  // Convert counts to prefix sum (row_offsets)
-  for (int i = 1; i <= num_rows; i++) matrix.row_offsets[i] += matrix.row_offsets[i - 1];
-
-  // Fill col_indices and values
-  std::vector<int> insert_pos(matrix.row_offsets, matrix.row_offsets + num_rows);
-
-  for (int i = 0; i < num_nonzeros; i++) {
-    int row = coo_rows[i];
-    int pos = insert_pos[row]++;
-    matrix.col_indices[pos] = coo_cols[i];
-    matrix.values[pos] = coo_vals[i];
-  }
-
+  queue.memcpy(matrix.row_offsets, h_row_offsets, (num_rows + 1) * sizeof(int));
+  queue.memcpy(matrix.col_indices, h_col_indices, num_nonzeros * sizeof(int));
+  queue.memcpy(matrix.values, h_values, num_nonzeros * sizeof(Scalar));
   queue.wait();
-  queue.prefetch(matrix.row_offsets, (num_rows + 1) * sizeof(int));
-  queue.prefetch(matrix.col_indices, num_nonzeros * sizeof(int));
-  queue.prefetch(matrix.values, num_nonzeros * sizeof(double));
-  queue.wait();
+
+  sycl::free(h_row_offsets, queue);
+  sycl::free(h_col_indices, queue);
+  sycl::free(h_values, queue);
 
   return matrix;
 }
 
 // Free CSR matrix USM allocations
-inline void free_csr_matrix(CSRMatrix& matrix, sycl::queue& queue)
+template <class Scalar>
+inline void free_csr_matrix(CSRMatrix<Scalar>& matrix, sycl::queue& queue)
 {
   if (matrix.row_offsets) sycl::free(matrix.row_offsets, queue);
   if (matrix.col_indices) sycl::free(matrix.col_indices, queue);
@@ -144,13 +150,37 @@ public:
       : Base(queue, 0) // N will be set after loading
   {
     // Load the matrix from Matrix Market file
-    matrix_ = load_matrix_market(matrix_file, this->queue);
+    matrix_ = load_matrix_market<T>(matrix_file, this->queue);
 
     if (matrix_.num_rows != matrix_.num_cols) throw std::runtime_error("CSREVP requires a square matrix");
 
     // Set the matrix dimension in the base class and reinitialize Vtemp
     this->N = matrix_.num_rows;
     this->Vtemp.emplace(this->create_multivector(this->N, bs));
+
+    // Create cublas handle
+    cusparseCreate(&handle);
+    cusparseCreateCsr(&cumat, matrix_.num_rows, matrix_.num_rows, matrix_.num_nonzeros, matrix_.row_offsets, matrix_.col_indices, matrix_.values,
+                      CUSPARSE_INDEX_32I, CUSPARSE_INDEX_32I, CUSPARSE_INDEX_BASE_ZERO, CUDA_R_64F);
+
+    std::size_t bufferSize;
+    T alpha = 1.;
+    T beta = 0.;
+
+    auto X = this->create_multivector(this->N, bs);
+    auto Y = this->create_multivector(this->N, bs);
+    this->queue.wait();
+
+    cusparseDnMatDescr_t matX;
+    cusparseDnMatDescr_t matY;
+    cusparseCreateDnMat(&matX, this->N, bs, bs, X.block_view(0).data, CUDA_R_64F, CUSPARSE_ORDER_ROW);
+    cusparseCreateDnMat(&matY, this->N, bs, bs, Y.block_view(0).data, CUDA_R_64F, CUSPARSE_ORDER_ROW);
+    cusparseSpMM_bufferSize(handle, CUSPARSE_OPERATION_NON_TRANSPOSE, CUSPARSE_OPERATION_NON_TRANSPOSE, &alpha, cumat, matX, &beta, matY, CUDA_R_64F,
+                            CUSPARSE_SPMM_CSR_ALG2, &bufferSize);
+    buf = sycl::malloc_device(bufferSize, this->queue);
+    cusparseSpMM_preprocess(handle, CUSPARSE_OPERATION_NON_TRANSPOSE, CUSPARSE_OPERATION_NON_TRANSPOSE, &alpha, cumat, matX, &beta, matY, CUDA_R_64F,
+                            CUSPARSE_SPMM_CSR_ALG2, buf);
+    this->queue.wait();
   }
 
   ~CSREVP() { free_csr_matrix(matrix_, this->queue); }
@@ -159,7 +189,9 @@ public:
   {
     // Compute Y = A * X where A is sparse (CSR) and X is a tall-skinny matrix
     // X and Y are stored row-major with bs columns per row
+    static auto* ev = trl::sycl::SyclProfiler::get().registerOrGetEvent(trl::sycl::SyclProfiler::get().registerOrGetFamily("CSREVP"), "apply");
 
+#if 1
     const auto ncus = this->queue.get_device().template get_info<::sycl::info::device::max_compute_units>();
     const auto global_size = 128 * bs * ncus;
 
@@ -167,10 +199,10 @@ public:
     T* Y_data = Y.data;
     const int* row_offsets = matrix_.row_offsets;
     const int* col_indices = matrix_.col_indices;
-    const double* values = matrix_.values;
+    const T* values = matrix_.values;
     const std::size_t num_rows = matrix_.num_rows;
 
-    this->queue.parallel_for(sycl::range<1>(global_size), [=](sycl::id<1> idx) {
+    auto e = this->queue.parallel_for(sycl::range<1>(global_size), [=](sycl::id<1> idx) {
       const std::size_t start = idx[0];
 
       for (std::size_t row = start; row < num_rows; row += global_size) {
@@ -189,8 +221,37 @@ public:
         }
       }
     });
+#else
+    const std::size_t num_rows = matrix_.num_rows;
+    T* X_data = X.data;
+    T* Y_data = Y.data;
+
+    auto e = this->queue.submit([=, handle = handle, cumat = cumat, buf = buf](auto& cgh) {
+      T alpha = 1.;
+      T beta = 0.;
+
+      cgh.AdaptiveCpp_enqueue_custom_operation([=](auto& interop_handle) {
+        auto stream = interop_handle.template get_native_queue<sycl::backend::cuda>();
+        cusparseSetStream(handle, stream);
+
+        cusparseDnMatDescr_t matX;
+        cusparseDnMatDescr_t matY;
+
+        cusparseCreateDnMat(&matX, num_rows, bs, bs, X_data, CUDA_R_64F, CUSPARSE_ORDER_ROW);
+        cusparseCreateDnMat(&matY, num_rows, bs, bs, Y_data, CUDA_R_64F, CUSPARSE_ORDER_ROW);
+        cusparseSpMM(handle, CUSPARSE_OPERATION_NON_TRANSPOSE, CUSPARSE_OPERATION_NON_TRANSPOSE, &alpha, cumat, matX, &beta, matY, CUDA_R_64F,
+                     CUSPARSE_SPMM_CSR_ALG2, buf);
+      });
+    });
+
+#endif
+    trl::sycl::SyclProfiler::get().pushEvent(ev, e);
   }
 
 private:
-  CSRMatrix matrix_;
+  CSRMatrix<T> matrix_;
+
+  cusparseHandle_t handle;
+  cusparseSpMatDescr_t cumat;
+  void* buf = nullptr;
 };

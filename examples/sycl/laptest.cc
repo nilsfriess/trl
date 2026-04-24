@@ -31,7 +31,7 @@
 #include <random>
 #include <vector>
 
-constexpr unsigned int BLOCKSIZE = 1;
+constexpr unsigned int BLOCKSIZE = 4;
 
 int main(int argc, char* argv[])
 {
@@ -67,7 +67,7 @@ int main(int argc, char* argv[])
   Spectra::SymEigsSolver<Op> eigs(op, nev, ncv);
   eigs.init();
 
-  double tolerance = 1e-5;
+  double tolerance = 1e-3;
   std::cout << "Running Spectra (reference)...\n";
   const auto spectra_start = std::chrono::steady_clock::now();
   eigs.compute(Spectra::SortRule::LargestMagn, 1000, tolerance);
