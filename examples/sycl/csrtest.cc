@@ -9,7 +9,6 @@
 #include "csrevp.hh"
 #include "trl/impl/sycl/profiling.hh"
 
-#include <cudss.h>
 #include <sycl/sycl.hpp>
 #include <vector>
 
@@ -27,9 +26,9 @@ int main(int argc, char* argv[])
       [&]() { std::cout << "SYCL device: " << queue.get_device().get_info<sycl::info::device::name>() << "\n\n"; },
       [&](auto V0, auto& rng, auto& dist) {
         const std::size_t n = V0.rows() * V0.cols();
-        std::vector<double> v0_host(n);
-        std::generate_n(v0_host.begin(), n, [&]() { return dist(rng); });
-        queue.memcpy(V0.data, v0_host.data(), n * sizeof(double)).wait();
+        std::vector<Scalar> v0_host(n);
+        std::generate_n(v0_host.begin(), n, [&]() { return static_cast<Scalar>(dist(rng)); });
+        queue.memcpy(V0.data, v0_host.data(), n * sizeof(Scalar)).wait();
       },
       [&]() { queue.wait(); });
 

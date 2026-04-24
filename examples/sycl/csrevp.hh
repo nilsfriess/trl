@@ -3,7 +3,6 @@
 #include "evp_base.hh"
 
 #include <algorithm>
-#include <cusparse.h>
 #include <fstream>
 #include <sstream>
 #include <stdexcept>
@@ -157,30 +156,6 @@ public:
     // Set the matrix dimension in the base class and reinitialize Vtemp
     this->N = matrix_.num_rows;
     this->Vtemp.emplace(this->create_multivector(this->N, bs));
-
-    // Create cublas handle
-    cusparseCreate(&handle);
-    cusparseCreateCsr(&cumat, matrix_.num_rows, matrix_.num_rows, matrix_.num_nonzeros, matrix_.row_offsets, matrix_.col_indices, matrix_.values,
-                      CUSPARSE_INDEX_32I, CUSPARSE_INDEX_32I, CUSPARSE_INDEX_BASE_ZERO, CUDA_R_64F);
-
-    std::size_t bufferSize;
-    T alpha = 1.;
-    T beta = 0.;
-
-    auto X = this->create_multivector(this->N, bs);
-    auto Y = this->create_multivector(this->N, bs);
-    this->queue.wait();
-
-    cusparseDnMatDescr_t matX;
-    cusparseDnMatDescr_t matY;
-    cusparseCreateDnMat(&matX, this->N, bs, bs, X.block_view(0).data, CUDA_R_64F, CUSPARSE_ORDER_ROW);
-    cusparseCreateDnMat(&matY, this->N, bs, bs, Y.block_view(0).data, CUDA_R_64F, CUSPARSE_ORDER_ROW);
-    cusparseSpMM_bufferSize(handle, CUSPARSE_OPERATION_NON_TRANSPOSE, CUSPARSE_OPERATION_NON_TRANSPOSE, &alpha, cumat, matX, &beta, matY, CUDA_R_64F,
-                            CUSPARSE_SPMM_CSR_ALG2, &bufferSize);
-    buf = sycl::malloc_device(bufferSize, this->queue);
-    cusparseSpMM_preprocess(handle, CUSPARSE_OPERATION_NON_TRANSPOSE, CUSPARSE_OPERATION_NON_TRANSPOSE, &alpha, cumat, matX, &beta, matY, CUDA_R_64F,
-                            CUSPARSE_SPMM_CSR_ALG2, buf);
-    this->queue.wait();
   }
 
   ~CSREVP() { free_csr_matrix(matrix_, this->queue); }
@@ -191,7 +166,6 @@ public:
     // X and Y are stored row-major with bs columns per row
     static auto* ev = trl::sycl::SyclProfiler::get().registerOrGetEvent(trl::sycl::SyclProfiler::get().registerOrGetFamily("CSREVP"), "apply");
 
-#if 1
     const auto ncus = this->queue.get_device().template get_info<::sycl::info::device::max_compute_units>();
     const auto global_size = 128 * bs * ncus;
 
@@ -221,37 +195,9 @@ public:
         }
       }
     });
-#else
-    const std::size_t num_rows = matrix_.num_rows;
-    T* X_data = X.data;
-    T* Y_data = Y.data;
-
-    auto e = this->queue.submit([=, handle = handle, cumat = cumat, buf = buf](auto& cgh) {
-      T alpha = 1.;
-      T beta = 0.;
-
-      cgh.AdaptiveCpp_enqueue_custom_operation([=](auto& interop_handle) {
-        auto stream = interop_handle.template get_native_queue<sycl::backend::cuda>();
-        cusparseSetStream(handle, stream);
-
-        cusparseDnMatDescr_t matX;
-        cusparseDnMatDescr_t matY;
-
-        cusparseCreateDnMat(&matX, num_rows, bs, bs, X_data, CUDA_R_64F, CUSPARSE_ORDER_ROW);
-        cusparseCreateDnMat(&matY, num_rows, bs, bs, Y_data, CUDA_R_64F, CUSPARSE_ORDER_ROW);
-        cusparseSpMM(handle, CUSPARSE_OPERATION_NON_TRANSPOSE, CUSPARSE_OPERATION_NON_TRANSPOSE, &alpha, cumat, matX, &beta, matY, CUDA_R_64F,
-                     CUSPARSE_SPMM_CSR_ALG2, buf);
-      });
-    });
-
-#endif
     trl::sycl::SyclProfiler::get().pushEvent(ev, e);
   }
 
 private:
   CSRMatrix<T> matrix_;
-
-  cusparseHandle_t handle;
-  cusparseSpMatDescr_t cumat;
-  void* buf = nullptr;
 };
