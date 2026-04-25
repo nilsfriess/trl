@@ -156,9 +156,10 @@ public:
         try {
           se.wait();
           const auto start = se.get_profiling_info<::sycl::info::event_profiling::command_start>();
-          const auto end   = se.get_profiling_info<::sycl::info::event_profiling::command_end>();
+          const auto end = se.get_profiling_info<::sycl::info::event_profiling::command_end>();
           if (end > start) ev.total_ns += end - start;
-        } catch (const ::sycl::exception& ex) {
+        }
+        catch (const ::sycl::exception& ex) {
           if (!warned) {
             out << "[SyclProfiler] Warning: could not query profiling info.\n"
                 << "  Make sure the queue was created with "
@@ -171,42 +172,35 @@ public:
       ev.pending_events.clear();
     };
 
-    constexpr int W_EVENT  = 22;
-    constexpr int W_TOTAL  = 17;
-    constexpr int W_MEAN   = 16;
-    constexpr int W_CALLS  = 12;
+    constexpr int W_EVENT = 22;
+    constexpr int W_TOTAL = 17;
+    constexpr int W_MEAN = 16;
+    constexpr int W_CALLS = 12;
     const std::string sep(W_EVENT + 2 + W_TOTAL + 3 + W_MEAN + 3 + W_CALLS, '-');
 
     out << "\n==========================================================================================\n";
     out << "#                              SYCL Profiling Report                                     #\n";
     out << "==========================================================================================\n";
-    out << std::left  << std::setw(W_EVENT) << "Event"
-        << "| " << std::right << std::setw(W_TOTAL) << "Total time [ms]"
-        << " | "  << std::right << std::setw(W_MEAN)  << "Mean time [ms]"
-        << " | "  << std::right << std::setw(W_CALLS) << "Times called"
-        << "\n" << sep << "\n";
+    out << std::left << std::setw(W_EVENT) << "Event" << "| " << std::right << std::setw(W_TOTAL) << "Total time [ms]" << " | " << std::right
+        << std::setw(W_MEAN) << "Mean time [ms]" << " | " << std::right << std::setw(W_CALLS) << "Times called" << "\n"
+        << sep << "\n";
 
     for (auto& family : families_) {
       out << std::left << std::setw(W_EVENT) << family.name << "|\n";
       for (auto& ev : family.events) {
         drain(ev);
         const double total_ms = static_cast<double>(ev.total_ns) * 1e-6;
-        const double mean_ms  = ev.times_called > 0
-                                    ? total_ms / static_cast<double>(ev.times_called)
-                                    : 0.0;
-        out << "  " << std::left  << std::setw(W_EVENT - 2) << ev.name
-            << "| " << std::right << std::fixed << std::setprecision(3)
-                                  << std::setw(W_TOTAL) << total_ms
-            << " | " << std::right << std::fixed << std::setprecision(3)
-                                   << std::setw(W_MEAN)  << mean_ms
-            << " | " << std::right << std::setw(W_CALLS) << ev.times_called
-            << "\n";
+        const double mean_ms = ev.times_called > 0 ? total_ms / static_cast<double>(ev.times_called) : 0.0;
+        out << "  " << std::left << std::setw(W_EVENT - 2) << ev.name << "| " << std::right << std::fixed << std::setprecision(3)
+            << std::setw(W_TOTAL) << total_ms << " | " << std::right << std::fixed << std::setprecision(3) << std::setw(W_MEAN) << mean_ms << " | "
+            << std::right << std::setw(W_CALLS) << ev.times_called << "\n";
       }
     }
     out << sep << "\n";
   }
 
 private:
+  ::sycl::queue q;
   std::mutex registry_mutex_;
   std::list<Family> families_; // std::list for pointer stability
 };
@@ -245,9 +239,9 @@ public:
   struct Family {};
 
   Family* registerOrGetFamily(const std::string& /*name*/) { return nullptr; }
-  Event*  registerOrGetEvent(Family* /*family*/, const std::string& /*name*/) { return nullptr; }
-  void    pushEvent(Event* /*event*/, ::sycl::event /*sycl_event*/) {}
-  void    report(std::ostream& /*out*/ = std::cout) {}
+  Event* registerOrGetEvent(Family* /*family*/, const std::string& /*name*/) { return nullptr; }
+  void pushEvent(Event* /*event*/, ::sycl::event /*sycl_event*/) {}
+  void report(std::ostream& /*out*/ = std::cout) {}
 };
 
 } // namespace trl::sycl

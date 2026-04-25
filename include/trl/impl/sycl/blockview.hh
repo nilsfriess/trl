@@ -36,7 +36,7 @@ public:
   }
 
   // Default copy operations (copying a view is cheap)
-  BlockView(const BlockView&) = default;
+  BlockView(const BlockView& other) = default;
 
   BlockView& operator=(const BlockView&) = default;
 
@@ -54,8 +54,7 @@ public:
   void copy_from(const BlockView& source)
   {
     assert(rows_ == source.rows_);
-    static auto* ev = SyclProfiler::get().registerOrGetEvent(
-        SyclProfiler::get().registerOrGetFamily("BlockView"), "copy_from");
+    static auto* ev = SyclProfiler::get().registerOrGetEvent(SyclProfiler::get().registerOrGetFamily("BlockView"), "copy_from");
     auto e = q->memcpy(data, source.data, rows_ * cols_ * sizeof(T));
     SyclProfiler::get().pushEvent(ev, e);
   }
@@ -63,6 +62,8 @@ public:
   template <bool transposed = true>
   void dot(BlockView B, MatrixBlockView C)
   {
+    static auto* ev = SyclProfiler::get().registerOrGetEvent(SyclProfiler::get().registerOrGetFamily("BlockView"), "dot");
+
     C.set_zero();
 
     constexpr auto TNTM = []() {
@@ -93,8 +94,6 @@ public:
       else return nidx * TN + tn;
     };
 
-    static auto* ev = SyclProfiler::get().registerOrGetEvent(
-        SyclProfiler::get().registerOrGetFamily("BlockView"), "dot");
     auto e = q->submit([&](auto& cgh) {
       const auto* a = data;
       const auto* b = B.data;
@@ -161,8 +160,7 @@ public:
     const auto n = rows();
     const auto stride = global_size_;
 
-    static auto* ev = SyclProfiler::get().registerOrGetEvent(
-        SyclProfiler::get().registerOrGetFamily("BlockView"), "gemm");
+    static auto* ev = SyclProfiler::get().registerOrGetEvent(SyclProfiler::get().registerOrGetFamily("BlockView"), "gemm");
     auto e = q->submit([&](auto& cgh) {
       const auto* a = A.data;
       const auto* b = B.data;
@@ -197,8 +195,7 @@ public:
     const auto n = rows();
     const auto global_size = global_size_;
 
-    static auto* ev = SyclProfiler::get().registerOrGetEvent(
-        SyclProfiler::get().registerOrGetFamily("BlockView"), "operator-=");
+    static auto* ev = SyclProfiler::get().registerOrGetEvent(SyclProfiler::get().registerOrGetFamily("BlockView"), "operator-=");
     auto e = q->submit([&](auto& cgh) {
       auto* a = data;
       auto* b = B.data;
@@ -222,8 +219,7 @@ public:
 
   void set_zero()
   {
-    static auto* ev = SyclProfiler::get().registerOrGetEvent(
-        SyclProfiler::get().registerOrGetFamily("BlockView"), "set_zero");
+    static auto* ev = SyclProfiler::get().registerOrGetEvent(SyclProfiler::get().registerOrGetFamily("BlockView"), "set_zero");
     auto e = q->memset(data, 0, rows_ * cols_ * sizeof(T));
     SyclProfiler::get().pushEvent(ev, e);
   }

@@ -12,11 +12,11 @@
 #include <sycl/sycl.hpp>
 #include <vector>
 
-constexpr unsigned int BLOCKSIZE = 1;
+constexpr unsigned int BLOCKSIZE = 4;
 
 int main(int argc, char* argv[])
 {
-  using Scalar = float;
+  using Scalar = double;
 
   sycl::queue queue{{sycl::property::queue::in_order{}, sycl::property::queue::enable_profiling{}}};
   using EVP = CSREVP<Scalar, BLOCKSIZE>;

@@ -2,12 +2,21 @@
 
 #include <Eigen/Core>
 #include <Eigen/Dense>
+#include <cstdio>
+#include <cstdlib>
 #include <iostream>
 #include <limits>
 #include <optional>
 #include <span>
 #include <sycl/sycl.hpp>
 #include <trl/impl/sycl/multivector.hh>
+
+#define TODO(msg)                                                                                                                                    \
+  do {                                                                                                                                               \
+    std::fprintf(stderr, "%s:%d:1: TODO: %s\n", __FILE__, __LINE__, msg);                                                                            \
+    std::fflush(stderr);                                                                                                                             \
+    std::abort();                                                                                                                                    \
+  } while (0)
 
 template <class T, unsigned int bs>
 class StandardEVPBase {
@@ -42,12 +51,13 @@ public:
 
   virtual void apply(BlockView X, BlockView Y) = 0;
 
-  void dot(BlockView X, BlockView Y, typename BlockMultivector::BlockMatrix::BlockView Z) { X.dot(Y, Z); }
+  virtual void dot(BlockView X, BlockView Y, typename BlockMultivector::BlockMatrix::BlockView Z) { X.dot(Y, Z); }
 
   void orthonormalize(BlockView V, typename BlockMultivector::BlockMatrix::BlockView R)
   {
     // 1. Compute Gram matrix G = V^T * V (stored in R)
-    V.dot(V, R);
+    // V.dot(V, R);
+    this->dot(V, V, R);
     queue.wait();
 
     if constexpr (bs == 1) {
@@ -126,7 +136,7 @@ public:
     // Copy beta from device to host
     queue.memcpy(beta_host, beta.data, bs * bs * sizeof(T)).wait();
 
-    using HighPrec = double;
+    using HighPrec = T;
 
     Eigen::Matrix<HighPrec, Eigen::Dynamic, Eigen::Dynamic> B_dense(n, n);
 
@@ -136,10 +146,7 @@ public:
           for (unsigned int bj = 0; bj < bs; ++bj)
             B_dense(i * bs + bi, j * bs + bj) = B_large_host[(i * B.block_cols() + j) * bs * bs + bi * bs + bj];
 
-    std::cout << B_dense << std::endl;
-    
-    B_dense = ((B_dense + B_dense.transpose()) * HighPrec(0.5)).eval();
-    
+    // B_dense = ((B_dense + B_dense.transpose()) * HighPrec(0.5)).eval();
 
     // Compute eigendecomposition
     Eigen::SelfAdjointEigenSolver<Eigen::Matrix<HighPrec, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>> solver(B_dense);

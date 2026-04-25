@@ -15,6 +15,12 @@ if(${WITH_SYCL_BACKEND})
   target_link_libraries(csrtest_sycl PRIVATE trl::trl Spectra)
   add_sycl_to_target(TARGET csrtest_sycl)
 
+  add_executable(gevp_test_sycl gevp_test.cc)
+  target_include_directories(gevp_test_sycl PRIVATE ../../include ${CMAKE_BINARY_DIR}/_deps/spectra-src/include)
+  target_link_libraries(gevp_test_sycl PRIVATE trl::trl Spectra)
+  add_sycl_to_target(TARGET gevp_test_sycl)
+  target_compile_options(gevp_test_sycl PUBLIC -Wall -Wextra -Wpedantic -pedantic -Wno-unused-parameter)
+
   add_executable(laptest_sycl laptest.cc)
   target_include_directories(laptest_sycl PRIVATE ../../include ${CMAKE_BINARY_DIR}/_deps/spectra-src/include)
   target_link_libraries(laptest_sycl PRIVATE trl::trl Spectra)
