@@ -149,15 +149,8 @@ public:
       Vk.mult(Tkk, W0);
       Vk1 -= W0;
 
-      // Subtract the contribution from V_{k-1} * beta_{k-1}^T
-      if (k > 0) {
-        auto Vk_prev = V.block_view(k - 1);
-        auto beta_prev = T.block_view(k, k - 1);
-        Vk_prev.mult_transpose(beta_prev, W0);
-        Vk1 -= W0;
-      }
-
-      // Reorthogonalise against all previous blocks
+      // Vk1 couples to every retained Ritz block here, not just Vk-1, so skip straight
+      // to full reorthogonalization instead of a single-neighbor subtraction.
       reorthogonalize_against(Vk1, k + 1, Z0);
 
       // Step 6: Orthonormalize V_{i+1} to get beta_i (Cholesky factor) and V_{i+1}
