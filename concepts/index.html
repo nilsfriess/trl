@@ -1,0 +1,229 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="../">
+<head>
+  <meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Overview of the concepts &mdash; trl 0.1 documentation</title>
+      <link rel="stylesheet" type="text/css" href="../_static/pygments.css?v=80d5e7a1" />
+      <link rel="stylesheet" type="text/css" href="../_static/css/theme.css?v=9edc463e" />
+
+  
+      <script src="../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../_static/documentation_options.js?v=2709fde1"></script>
+      <script src="../_static/doctools.js?v=fd6eb6e6"></script>
+      <script src="../_static/sphinx_highlight.js?v=6ffebe34"></script>
+    <script src="../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="Lanczos Method" href="../algorithms/lanczos.html" />
+    <link rel="prev" title="SYCL Backend" href="../backends/sycl.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="../index.html" class="icon icon-home">
+            trl
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">Backends:</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../backends/openmp.html">OpenMP Backend</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../backends/sycl.html">SYCL Backend</a></li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">C++ 20 Concepts</span></p>
+<ul class="current">
+<li class="toctree-l1 current"><a class="current reference internal" href="#">Overview of the concepts</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="#_CPPv4I0EN3trl12EigenproblemE"><code class="docutils literal notranslate"><span class="pre">Eigenproblem</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="#_CPPv4I0EN3trl16BlockMultiVectorE"><code class="docutils literal notranslate"><span class="pre">BlockMultiVector</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="#_CPPv4I0EN3trl15BlockVectorViewE"><code class="docutils literal notranslate"><span class="pre">BlockVectorView</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="#_CPPv4I0EN3trl18BlockMatrixConceptE"><code class="docutils literal notranslate"><span class="pre">BlockMatrixConcept</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="#_CPPv4I000EN3trl27ReorthogonalizationStrategyE"><code class="docutils literal notranslate"><span class="pre">ReorthogonalizationStrategy</span></code></a></li>
+</ul>
+</li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">Algorithms:</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../algorithms/lanczos.html">Lanczos Method</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../index.html">trl</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../index.html" class="icon icon-home" aria-label="Home"></a></li>
+      <li class="breadcrumb-item active">Overview of the concepts</li>
+      <li class="wy-breadcrumbs-aside">
+            <a href="../_sources/concepts/index.rst.txt" rel="nofollow"> View page source</a>
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <section id="overview-of-the-concepts">
+<h1>Overview of the concepts<a class="headerlink" href="#overview-of-the-concepts" title="Link to this heading"></a></h1>
+<p>The implemented eigensolvers are based on a templated type <cite>EVP</cite> that must implement the Eigenproblem concept.
+Each Eigenproblem must export certain types which themselves must adhere to certain rules that are also defined as concepts. This facilitates the development of new backends. The documentation of all the necessary concepts is given below. Detailed descriptions of the individual methods that these concepts require are given in the OpenMP backend documentation.</p>
+<dl class="cpp concept">
+<dt class="sig sig-object cpp" id="_CPPv4I0EN3trl12EigenproblemE">
+<span id="_CPPv3I0EN3trl12EigenproblemE"></span><span id="_CPPv2I0EN3trl12EigenproblemE"></span><span class="target" id="concepttrl_1_1Eigenproblem"></span><span class="k"><span class="pre">template</span></span><span class="p"><span class="pre">&lt;</span></span><span class="k"><span class="pre">class</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">EVP</span></span></span><span class="p"><span class="pre">&gt;</span></span><br /><span class="k"><span class="pre">concept</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">Eigenproblem</span></span></span><a class="headerlink" href="#_CPPv4I0EN3trl12EigenproblemE" title="Link to this definition"></a><br /></dt>
+<dd><div class="docutils container">
+<em>#include &lt;concepts.hh&gt;</em></div>
+<p>Concept for eigenvalue problems. </p>
+<p>An Eigenproblem bundles the operator, inner product, and small dense solver needed by the block Lanczos algorithm. It also provides factory methods for backend-specific multivectors and block matrices.</p>
+<p><dl class="simple">
+<dt><strong>Requirements</strong></dt><dd><p><ul class="simple">
+<li><p>types: Scalar, BlockMultivector (satisfies BlockMultiVector)</p></li>
+<li><p>blocksize consistent with BlockMultivector::blocksize</p></li>
+<li><p>apply: Y = A * X (or transformed operator)</p></li>
+<li><p>dot: B = X^T * Y (or B-inner product)</p></li>
+<li><p>orthonormalize: X &lt;- X * R^{-1}, output R (upper triangular)</p></li>
+<li><p>size: global problem dimension</p></li>
+<li><p>create_multivector, create_blockmatrix: factory methods</p></li>
+<li><p>solve_small_dense: solve projected problem, return converged count</p></li>
+<li><p>get_current_eigenvalues, get_current_eigenvectors: latest Ritz data</p></li>
+<li><p>get_eigenvalues_block: block of eigenvalues used for restart</p></li>
+</ul>
+</p>
+</dd>
+<dt><strong>Semantics</strong></dt><dd><p>For standard problems, dot computes X^T * Y. For generalized problems, dot may implement X^T * B * Y. The orthonormalize routine should leave R such that X_old = X_new * R, with R upper triangular. </p>
+</dd>
+</dl>
+</p>
+</dd></dl>
+
+<dl class="cpp concept">
+<dt class="sig sig-object cpp" id="_CPPv4I0EN3trl16BlockMultiVectorE">
+<span id="_CPPv3I0EN3trl16BlockMultiVectorE"></span><span id="_CPPv2I0EN3trl16BlockMultiVectorE"></span><span class="target" id="concepttrl_1_1BlockMultiVector"></span><span class="k"><span class="pre">template</span></span><span class="p"><span class="pre">&lt;</span></span><span class="k"><span class="pre">class</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">BMV</span></span></span><span class="p"><span class="pre">&gt;</span></span><br /><span class="k"><span class="pre">concept</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">BlockMultiVector</span></span></span><a class="headerlink" href="#_CPPv4I0EN3trl16BlockMultiVectorE" title="Link to this definition"></a><br /></dt>
+<dd><div class="docutils container">
+<em>#include &lt;concepts.hh&gt;</em></div>
+<p>Concept for block multivectors. </p>
+<p>A BlockMultivector stores a set of vectors grouped into fixed-size blocks. It is the primary data structure for Lanczos basis vectors.</p>
+<p><dl class="simple">
+<dt><strong>Requirements</strong></dt><dd><p><ul class="simple">
+<li><p>blocksize: compile-time block size</p></li>
+<li><p>block_view: access a block view by block index</p></li>
+<li><p>BlockView satisfies BlockVectorView</p></li>
+<li><p>BlockMatrix satisfies BlockMatrixConcept </p></li>
+</ul>
+</p>
+</dd>
+</dl>
+</p>
+</dd></dl>
+
+<dl class="cpp concept">
+<dt class="sig sig-object cpp" id="_CPPv4I0EN3trl15BlockVectorViewE">
+<span id="_CPPv3I0EN3trl15BlockVectorViewE"></span><span id="_CPPv2I0EN3trl15BlockVectorViewE"></span><span class="target" id="concepttrl_1_1BlockVectorView"></span><span class="k"><span class="pre">template</span></span><span class="p"><span class="pre">&lt;</span></span><span class="k"><span class="pre">class</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">BV</span></span></span><span class="p"><span class="pre">&gt;</span></span><br /><span class="k"><span class="pre">concept</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">BlockVectorView</span></span></span><a class="headerlink" href="#_CPPv4I0EN3trl15BlockVectorViewE" title="Link to this definition"></a><br /></dt>
+<dd><div class="docutils container">
+<em>#include &lt;concepts.hh&gt;</em></div>
+<p>Concept for block vector views. </p>
+<p>A BlockView is a view into a contiguous block of vectors inside a BlockMultivector. The Lanczos algorithm uses these views to build and orthogonalize block Krylov bases.</p>
+<p><dl class="simple">
+<dt><strong>Requirements</strong></dt><dd><p><ul class="simple">
+<li><p>set_zero, rows, cols, copy_from</p></li>
+<li><p>operator-=: in-place subtraction</p></li>
+<li><p>mult_add: other += this * W</p></li>
+<li><p>mult: other = this * W</p></li>
+<li><p>mult_transpose: other = this * W^T</p></li>
+<li><p>subtract_product: this -= other * W</p></li>
+</ul>
+</p>
+</dd>
+<dt><strong>Notes</strong></dt><dd><p>Operations are expected to be dense, block-sized linear algebra kernels. </p>
+</dd>
+</dl>
+</p>
+</dd></dl>
+
+<dl class="cpp concept">
+<dt class="sig sig-object cpp" id="_CPPv4I0EN3trl18BlockMatrixConceptE">
+<span id="_CPPv3I0EN3trl18BlockMatrixConceptE"></span><span id="_CPPv2I0EN3trl18BlockMatrixConceptE"></span><span class="target" id="concepttrl_1_1BlockMatrixConcept"></span><span class="k"><span class="pre">template</span></span><span class="p"><span class="pre">&lt;</span></span><span class="k"><span class="pre">class</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">BM</span></span></span><span class="p"><span class="pre">&gt;</span></span><br /><span class="k"><span class="pre">concept</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">BlockMatrixConcept</span></span></span><a class="headerlink" href="#_CPPv4I0EN3trl18BlockMatrixConceptE" title="Link to this definition"></a><br /></dt>
+<dd><div class="docutils container">
+<em>#include &lt;concepts.hh&gt;</em></div>
+<p>Concept for block matrices. </p>
+<p>A BlockMatrix stores a matrix as a grid of small dense blocks. It is used to represent the projected Lanczos matrix and small temporary blocks.</p>
+<p><dl class="simple">
+<dt><strong>Requirements</strong></dt><dd><p><ul class="simple">
+<li><p>block_rows, block_cols: number of block rows and columns</p></li>
+<li><p>block_view: obtain a view into the (i, j) block</p></li>
+<li><p>BlockView satisfies MatrixBlockViewConcept</p></li>
+</ul>
+</p>
+</dd>
+<dt><strong>Notes</strong></dt><dd><p>The block layout is implementation-defined, but block_view must behave like a lightweight, non-owning view. </p>
+</dd>
+</dl>
+</p>
+</dd></dl>
+
+<dl class="cpp concept">
+<dt class="sig sig-object cpp" id="_CPPv4I000EN3trl27ReorthogonalizationStrategyE">
+<span id="_CPPv3I000EN3trl27ReorthogonalizationStrategyE"></span><span id="_CPPv2I000EN3trl27ReorthogonalizationStrategyE"></span><span class="target" id="concepttrl_1_1ReorthogonalizationStrategy"></span><span class="k"><span class="pre">template</span></span><span class="p"><span class="pre">&lt;</span></span><span class="k"><span class="pre">typename</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">R</span></span></span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="k"><span class="pre">typename</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">EVP</span></span></span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="k"><span class="pre">typename</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">BMV</span></span></span><span class="p"><span class="pre">&gt;</span></span><br /><span class="k"><span class="pre">concept</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">ReorthogonalizationStrategy</span></span></span><a class="headerlink" href="#_CPPv4I000EN3trl27ReorthogonalizationStrategyE" title="Link to this definition"></a><br /></dt>
+<dd><div class="docutils container">
+<em>#include &lt;reorthogonalization.hh&gt;</em></div>
+<p>Concept for reorthogonalization strategies. </p>
+<p>A strategy must be callable with (EVP&amp;, BMV&amp;, unsigned count, BlockView, BlockMatrixBlockView) and orthogonalize the BlockView against the first <code class="docutils literal notranslate"><span class="pre">count</span></code> blocks of the basis. </p>
+</dd></dl>
+
+</section>
+
+
+           </div>
+          </div>
+          <footer><div class="rst-footer-buttons" role="navigation" aria-label="Footer">
+        <a href="../backends/sycl.html" class="btn btn-neutral float-left" title="SYCL Backend" accesskey="p" rel="prev"><span class="fa fa-arrow-circle-left" aria-hidden="true"></span> Previous</a>
+        <a href="../algorithms/lanczos.html" class="btn btn-neutral float-right" title="Lanczos Method" accesskey="n" rel="next">Next <span class="fa fa-arrow-circle-right" aria-hidden="true"></span></a>
+    </div>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2026, Nils Friess.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>
