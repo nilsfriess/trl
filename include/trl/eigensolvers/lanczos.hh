@@ -27,18 +27,14 @@ public:
   using Scalar = typename BMV::Scalar;
   static constexpr unsigned int blocksize = BMV::blocksize;
 
-  BlockLanczos(std::shared_ptr<EVP> evp_, const EigensolverParams& params)
-      : evp(std::move(evp_))
-      , nev(params.nev)
-      , ncv(params.ncv)
-      , max_restarts(params.max_restarts)
-      , res_norms(nev, 0)
-      , V(evp->create_multivector(evp->size(), ncv + EVP::blocksize))
-      , W(evp->create_multivector(evp->size(), ncv + EVP::blocksize))
-      // Allocate W with ncv columns to match matrix dimensions
-      , T(evp->create_blockmatrix(ncv / blocksize, ncv / blocksize))
-      , B(evp->create_blockmatrix(1, 2))
+  BlockLanczos(std::shared_ptr<EVP> evp_, const EigensolverParams &params)
+      : evp(std::move(evp_)), nev(params.nev), ncv(params.ncv), max_restarts(params.max_restarts), V(evp->create_multivector(evp->size(), ncv + EVP::blocksize)),
+        W(evp->create_multivector(evp->size(), ncv + EVP::blocksize)), // Allocate W with ncv columns to match matrix dimensions
+        T(evp->create_blockmatrix(ncv / blocksize, ncv / blocksize)), B(evp->create_blockmatrix(1, 2))
   {
+    if (nev % blocksize != 0)
+      throw std::invalid_argument("nev (" + std::to_string(nev) + ") must be a multiple of blocksize (" + std::to_string(blocksize) + ").");
+
     // Validate that we won't exhaust the Krylov subspace
     // The maximum number of orthogonal vectors is evp->size()
     // We need ncv + blocksize vectors (ncv blocks plus one trailing block)
@@ -47,17 +43,19 @@ public:
                                   "). Krylov subspace would be exhausted. Reduce ncv to at most " + std::to_string(evp->size() - blocksize) + ".");
     }
 
-    if (nev >= ncv) throw std::invalid_argument("nev must be strictly smaller than ncv");
+    if (nev >= ncv)
+      throw std::invalid_argument("nev must be strictly smaller than ncv");
 
-    // Validate that we have enough space for thick restart
-    // After restart, we keep k_restart = nev/blocksize + 1 blocks, and need at least 1 more to extend
+    // After restart we keep nev/blocksize Ritz blocks + 1 residual block, and need
+    // room for at least 1 more block to extend before the next solve
     unsigned int min_ncv_blocks = nev / blocksize + 2;
     if (ncv / blocksize < min_ncv_blocks) {
       throw std::invalid_argument("ncv (" + std::to_string(ncv) + ") is too small for thick restart with nev=" + std::to_string(nev) + " and blocksize=" + std::to_string(blocksize) +
                                   ". Minimum required: ncv >= " + std::to_string(min_ncv_blocks * blocksize) + ".");
     }
 
-    if constexpr (requires { evp->set_tolerance(Scalar(0)); }) evp->set_tolerance(static_cast<Scalar>(params.tolerance));
+    if constexpr (requires { evp->set_tolerance(Scalar(0)); })
+      evp->set_tolerance(static_cast<Scalar>(params.tolerance));
   }
 
   /** @brief Solves the eigenvalue problem using thick-restart Lanczos
@@ -74,12 +72,9 @@ public:
     auto beta = B.block_view(0, 0);
 
     while (result.iterations < max_restarts) {
-      // std::cout << "Restart iteration " << result.iterations << " (k=" << k << ", nev/bs=" << nev / blocksize << ", ncv/bs=" << ncv / blocksize << ")\n";
       result.iterations++;
 
-      // Extend the basis to the maximum allowed size. In the first iteration, k = 0 so here
-      // the initial Lanczos decomposition is built. In subsequent iterations, k = nev / blocksize
-      // because we retain the first nev blocks as restart vectors.
+      // Extend the basis up to the ncv budget: a full build when k == 0, a continuation after restart otherwise.
       result.n_op_apply += extend(k, ncv / blocksize);
 
       // Solve the small projected system
@@ -94,15 +89,10 @@ public:
 
       // We did not converge yet, so now we must prepare for restart. We begin by computing
       // the Ritz vectors that we will keep.
-      auto k_restart = nev / blocksize + 1;
+      auto k_restart = nev / blocksize;
+      assert(k_restart < ncv / blocksize);
 
-      // Check if we have enough space for restart
-      if (k_restart >= ncv / blocksize) {
-        // Not enough space to restart - return with partial convergence
-        break;
-      }
-
-      const auto& Y = evp->get_current_eigenvectors();
+      const auto &Y = evp->get_current_eigenvectors();
       for (std::size_t j = 0; j < k_restart; ++j) {
         auto Wj = W.block_view(j);
         Wj.set_zero();
@@ -117,8 +107,6 @@ public:
 
       std::swap(V, W);
 
-      // Reset convergence counter for the new basis
-      nconv = 0;
       // Put the first nev Ritz values on the diagonal of T
       for (std::size_t i = 0; i < k_restart; ++i) {
         for (std::size_t j = 0; j < k_restart; ++j) {
@@ -126,8 +114,7 @@ public:
           Tij.set_zero();
 
           if (i == j) {
-            const auto& evals = evp->get_eigenvalues_block(i);
-            // std::cout << "DEBUG restart: Setting T(" << i << "," << i << ") to eigenvalue " << evals.get_const_data()[0] << "\n";
+            const auto &evals = evp->get_eigenvalues_block(i);
             Tij.set_diagonal(evals);
           }
         }
@@ -205,18 +192,13 @@ public:
   auto initial_block() { return V.block_view(0); }
 
   /** @brief Return the current Lanczos vectors */
-  auto& get_basis() { return V; }
+  auto &get_basis() { return V; }
 
   /** @brief Return the block tridiagonal matrix T */
-  auto& get_T() { return T; }
+  auto &get_T() { return T; }
 
   /** @brief Return the B matrix containing beta values */
-  auto& get_B() { return B; }
-
-  /** @brief Return the number of converged eigenvalues */
-  unsigned int get_nconv() const { return nconv * blocksize; }
-
-  // const auto* get_eigenvalues() const { return ritz_values; }
+  auto &get_B() { return B; }
 
   /** @brief Extend the Lanczos basis from a step-k block factorisation to a step-m block factorisation
    *
@@ -293,11 +275,6 @@ private:
   unsigned int nev;
   unsigned int ncv;
   unsigned int max_restarts;
-  Scalar tolerance = 1e-8; // Default tolerance for convergence
-
-  // Convergence tracking
-  unsigned int nconv = 0;        // Number of converged blocks
-  std::vector<Scalar> res_norms; // Residual norms for each eigenvalue
 
   // Vectors and matrices
   BMV V;
