@@ -26,7 +26,7 @@
 #include "Spectra/MatOp/SymShiftInvert.h"
 #include "csrevp.hh"
 
-constexpr unsigned int BLOCKSIZE = 1;
+constexpr unsigned int BLOCKSIZE = 8;
 
 int main(int argc, char* argv[])
 {
@@ -53,12 +53,6 @@ int main(int argc, char* argv[])
   std::cout << "nev = " << nev << ", ncv = " << ncv << ", shift = " << shift << ", blocksize = " << BLOCKSIZE << "\n";
 
   try {
-    // Create the eigenvalue problem from the matrix files
-    using EVP = CSRGeneralizedEVP<double, BLOCKSIZE>;
-    auto evp = std::make_shared<EVP>(matrix_file_A, matrix_file_B, shift);
-
-    std::cout << "Matrix size: " << evp->size() << " x " << evp->size() << "\n\n";
-
     // Set up the Lanczos solver
     trl::EigensolverParams params{.nev = nev, .ncv = ncv, .max_restarts = 1000, .tolerance = 1e-8};
 
@@ -68,11 +62,11 @@ int main(int argc, char* argv[])
     Eigen::loadMarket(A, matrix_file_A);
     Eigen::loadMarket(B, matrix_file_B);
 
-    using Op = Spectra::SymShiftInvert<double>;
-    using BOp = Spectra::SparseSymMatProd<double>;
-    Op op(A, B);
-    BOp Bop(B);
-    Spectra::SymGEigsShiftSolver<Op, BOp, Spectra::GEigsMode::ShiftInvert> geigs(op, Bop, nev, ncv, shift);
+    using SpectraOp = Spectra::SymShiftInvert<double>;
+    using SpectraBOp = Spectra::SparseSymMatProd<double>;
+    SpectraOp spectra_op(A, B);
+    SpectraBOp spectra_Bop(B);
+    Spectra::SymGEigsShiftSolver<SpectraOp, SpectraBOp, Spectra::GEigsMode::ShiftInvert> geigs(spectra_op, spectra_Bop, nev, ncv, shift);
     constexpr std::size_t num_runs = 1;
 
     Eigen::VectorXd evalues;
@@ -97,15 +91,28 @@ int main(int argc, char* argv[])
     std::cout << "Eigenvalues found using spectra:\n" << std::fixed << std::setprecision(10) << evalues << std::endl;
 
     std::chrono::duration<double, std::milli> lanczos_total{0};
-    trl::EigensolverResult last_result{};
+    trl::EigensolverResult<double> last_result{};
+
+    // Create the eigenvalue problem from the matrix files
+    trl::openmp::Backend<double, BLOCKSIZE> backend;
+
+    using Op = GeneralizedEVPOperator<double, BLOCKSIZE>;
+    auto op = std::make_shared<Op>(matrix_file_A, matrix_file_B, shift);
+
+    std::cout << "Matrix size: " << op->size() << " x " << op->size() << "\n\n";
+
     for (std::size_t i = 0; i < num_runs; ++i) {
-      trl::BlockLanczos lanczos(evp, params);
+      trl::BlockLanczos lanczos(backend, op, params);
 
       // Initialize with random starting block
-      auto V0 = lanczos.initial_block();
-      std::mt19937 rng(42);
-      std::normal_distribution<double> dist;
-      std::generate_n(V0.data_, V0.rows() * V0.cols(), [&]() { return dist(rng); });
+      {
+        auto V0 = lanczos.initial_block();
+        auto host = backend.host_block(V0, trl::Access::Write);
+
+        std::mt19937 rng(42);
+        std::normal_distribution<double> dist;
+        std::generate_n(host.data(), host.size(), [&]() { return dist(rng); });
+      }
 
       // Solve
       std::cout << "Running Block Lanczos...\n";
@@ -133,7 +140,7 @@ int main(int argc, char* argv[])
     std::cout << "Computed eigenvalues (largest " << nev << "):\n";
     std::cout << std::fixed << std::setprecision(10);
 
-    auto trl_evals_raw = evp->get_current_eigenvalues();
+    const auto& trl_evals_raw = result.eigenvalues;
     std::vector<double> trl_evals_transformed;
     trl_evals_transformed.reserve(nev);
     for (unsigned int i = 0; i < nev; ++i) {

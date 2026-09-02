@@ -9,12 +9,12 @@
 #include "blockmatrix.hh"
 #include "blockview.hh"
 
-namespace trl::sycl {
+namespace trl::Sycl {
 /** @brief SYCL multivector backed by USM shared memory.
  *
  *  Backend specifics:
  *  - Allocates USM shared memory on construction.
- *  - Stores a ::sycl::queue by value for submissions.
+ *  - Stores a sycl::queue by value for submissions.
  *  - Assumes an in-order queue for implicit dependency ordering.
  *  - Copy constructor allocates new storage and zero-initializes it; it does
  *    not copy the underlying data.
@@ -29,14 +29,14 @@ public:
 
   using BlockMatrix = BlockMatrix<T, bs>;
 
-  BlockMultivector(::sycl::queue queue, std::size_t rows, std::size_t cols)
+  BlockMultivector(sycl::queue queue, std::size_t rows, std::size_t cols)
       : queue(queue)
       , rows(rows)
       , blocks_(cols / blocksize)
   {
     if (cols % blocksize != 0) throw std::invalid_argument("Number of columns must be divisible by blocksize");
 
-    data = ::sycl::malloc_shared<T>(rows * cols, queue);
+    data = sycl::malloc_shared<T>(rows * cols, queue);
     queue.memset(data, 0, rows * cols * sizeof(T)).wait();
   }
 
@@ -45,7 +45,7 @@ public:
       , rows(other.rows)
       , blocks_(other.blocks_)
   {
-    data = ::sycl::malloc_shared<T>(rows * blocks_ * bs, queue);
+    data = sycl::malloc_shared<T>(rows * blocks_ * bs, queue);
     queue.memset(data, 0, rows * blocks_ * bs * sizeof(T)).wait();
   }
 
@@ -53,11 +53,11 @@ public:
   {
     assert(false && "not implemented");
     if (this != &other) {
-      ::sycl::free(data, queue);
+      sycl::free(data, queue);
       queue = other.queue;
       rows = other.rows;
       blocks_ = other.blocks_;
-      data = ::sycl::malloc_shared<T>(rows * blocks_ * bs, queue);
+      data = sycl::malloc_shared<T>(rows * blocks_ * bs, queue);
       queue.memset(data, 0, rows * blocks_ * bs * sizeof(T)).wait();
     }
     return *this;
@@ -75,7 +75,7 @@ public:
   BlockMultivector& operator=(BlockMultivector&& other)
   {
     if (this != &other) {
-      if (data) ::sycl::free(data, queue);
+      if (data) sycl::free(data, queue);
       queue = other.queue;
       rows = other.rows;
       blocks_ = other.blocks_;
@@ -87,7 +87,7 @@ public:
 
   ~BlockMultivector()
   {
-    if (data) ::sycl::free(data, queue);
+    if (data) sycl::free(data, queue);
   }
 
   BlockView block_view(std::size_t block)
@@ -101,7 +101,7 @@ public:
   {
     assert(block < blocks_);
 
-    return BlockView(const_cast<::sycl::queue*>(&queue), data + block * rows * bs, rows);
+    return BlockView(const_cast<sycl::queue*>(&queue), data + block * rows * bs, rows);
   }
 
   std::size_t blocks() const { return blocks_; }
@@ -133,11 +133,11 @@ public:
   }
 
 private:
-  ::sycl::queue queue;
+  sycl::queue queue;
 
   std::size_t rows;
   std::size_t blocks_;
 
   T* data;
 };
-} // namespace trl::sycl
+} // namespace trl::Sycl

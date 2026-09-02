@@ -3,50 +3,48 @@
 #include <trl/concepts.hh>
 #include <trl/eigensolvers/lanczos.hh>
 
+#include <iostream>
 #include <memory>
 
 #include "helpers.hh"
+#include "test_helper.hh"
 
-template <trl::Eigenproblem EVP, class TestHelper>
-bool test_lanczos_extend(std::shared_ptr<EVP> evp, TestHelper& helper, typename EVP::Scalar tolerance, bool verbose)
+template <trl::Backend B, trl::Operator<B> O>
+bool test_lanczos_extend(B& backend, std::shared_ptr<O> op, typename B::Scalar tolerance, bool verbose)
 {
-  using Scalar = typename EVP::Scalar;
-  constexpr auto bs = EVP::blocksize;
-  auto N = evp->size();
+  using Scalar = typename B::Scalar;
+  constexpr auto bs = B::blocksize;
+  auto N = op->size();
 
   std::cout << "Testing Lanczos relation, type = " << trl::type_str<Scalar>() << ", N = " << N << ", bs = " << bs << ": " << std::flush;
 
   trl::EigensolverParams params{.nev = 8, .ncv = 32, .max_restarts = 1000};
-  trl::BlockLanczos lanczos(evp, params);
-
-  helper.sync();
+  trl::BlockLanczos lanczos(backend, op, params);
 
   auto V0 = lanczos.initial_block();
-  helper.set_random(V0);
-
-  helper.sync();
+  trl::test::set_random(backend, V0);
 
   const unsigned int num_blocks = params.ncv / bs;
   lanczos.extend(0, num_blocks);
 
-  helper.sync();
+  backend.sync();
 
   auto& V = lanczos.get_basis();
   auto& T = lanczos.get_T();
 
   // Check if the basis is orthogonal
-  bool passed = trl::check_orthogonality(*evp, helper, V, tolerance, verbose);
+  bool passed = trl::check_orthogonality(backend, V, tolerance, verbose);
 
   // Check if the basis satisfies the Lanczos relation
   // Compute A*V (only for the first num_blocks blocks, not including the last extended block)
-  auto AV = evp->create_multivector(N, params.ncv);
-  for (unsigned int i = 0; i < num_blocks; ++i) evp->apply(V.block_view(i), AV.block_view(i));
+  auto AV = backend.make_multivector(N, params.ncv);
+  for (unsigned int i = 0; i < num_blocks; ++i) op->apply(V.block_view(i), AV.block_view(i));
 
-  helper.sync(); // Wait for all apply operations
+  backend.sync(); // Wait for all apply operations
 
   // Compute V*T (using only the first num_blocks blocks of V).
   // We only have a multiplication for blocks, so we need to do the full multiplication by hand.
-  auto VT = evp->create_multivector(N, params.ncv);
+  auto VT = backend.make_multivector(N, params.ncv);
   for (std::size_t j = 0; j < T.block_cols(); ++j) {
     auto VTj = VT.block_view(j);
     VTj.set_zero();
@@ -58,7 +56,7 @@ bool test_lanczos_extend(std::shared_ptr<EVP> evp, TestHelper& helper, typename 
     }
   }
 
-  helper.sync(); // Wait for all mult_add operations
+  backend.sync(); // Wait for all mult_add operations
 
   // Compute residual: AV - VT
   for (std::size_t i = 0; i < AV.blocks(); ++i) {
@@ -67,7 +65,7 @@ bool test_lanczos_extend(std::shared_ptr<EVP> evp, TestHelper& helper, typename 
     AVi -= VTi;
   }
 
-  helper.sync(); // Wait for all subtraction operations
+  backend.sync(); // Wait for all subtraction operations
 
   // Check norms of all blocks except the last
   Scalar max_error = 0;
@@ -75,7 +73,7 @@ bool test_lanczos_extend(std::shared_ptr<EVP> evp, TestHelper& helper, typename 
   if (verbose) std::cout << "\n  Block norms of AV - VT:" << std::endl;
 
   for (unsigned int i = 0; i < num_blocks - 1; ++i) {
-    auto norm = helper.norm(AV.block_view(i));
+    auto norm = trl::test::norm(backend, AV.block_view(i));
     if (verbose) std::cout << "    Block " << i << ": " << norm << std::endl;
     if (norm > tolerance) {
       passed = false;
@@ -85,23 +83,23 @@ bool test_lanczos_extend(std::shared_ptr<EVP> evp, TestHelper& helper, typename 
 
   // Last block should equal V_{k+1} * beta
   // Compute residual term: V_{num_blocks} * beta
-  auto& B = lanczos.get_B();
-  auto beta = B.block_view(0, 0);
+  auto& beta_mat = lanczos.get_beta();
+  auto beta = beta_mat.block_view(0, 0);
   auto V_kplus1 = V.block_view(num_blocks);
 
-  auto residual_term = evp->create_multivector(N, bs);
+  auto residual_term = backend.make_multivector(N, bs);
   auto residual_block = residual_term.block_view(0);
   V_kplus1.mult(beta, residual_block);
 
-  helper.sync(); // Wait for mult operation
+  backend.sync(); // Wait for mult operation
 
   // Check difference between (AV - VT)_{last} and V_{k+1} * beta^T
   auto last_block_view = AV.block_view(num_blocks - 1);
   last_block_view -= residual_block;
 
-  helper.sync(); // Wait for subtraction
+  backend.sync(); // Wait for subtraction
 
-  auto last_block_error = helper.norm(last_block_view);
+  auto last_block_error = trl::test::norm(backend, last_block_view);
 
   if (verbose) std::cout << "    Block " << (num_blocks - 1) << " (last) error: " << last_block_error << std::endl;
 
@@ -114,4 +112,35 @@ bool test_lanczos_extend(std::shared_ptr<EVP> evp, TestHelper& helper, typename 
   else std::cout << "Not passed. Max error: " << max_error << std::endl;
 
   return passed;
+}
+
+template <class Fixture, class Scalar, unsigned int bs>
+bool run_extend_diagonal(bool verbose)
+{
+  const unsigned int N = 128;
+  auto backend = Fixture::template make_backend<Scalar, bs>();
+  auto op = Fixture::template make_diagonal<Scalar, bs>(N);
+
+  return test_lanczos_extend(backend, op, Scalar(1e-8), verbose);
+}
+
+template <class Fixture>
+int run_extend_suite(bool verbose = true)
+{
+  std::cout << "========================================\n";
+  std::cout << "<<<<<<<<<   " << Fixture::name << " TEST   >>>>>>>>>\n";
+  std::cout << "========================================\n";
+
+  std::cout << "========================================\n";
+  std::cout << "Testing with DiagonalEVP\n";
+  std::cout << "========================================\n";
+
+  int num_failed = 0;
+
+  if (!run_extend_diagonal<Fixture, double, 1>(verbose)) num_failed++;
+  if (!run_extend_diagonal<Fixture, double, 2>(verbose)) num_failed++;
+  if (!run_extend_diagonal<Fixture, double, 4>(verbose)) num_failed++;
+  if (!run_extend_diagonal<Fixture, double, 8>(verbose)) num_failed++;
+
+  return num_failed;
 }

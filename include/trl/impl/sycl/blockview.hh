@@ -11,12 +11,12 @@
 
 inline constexpr std::size_t to_linear_index(std::size_t cols, std::size_t i, std::size_t j) { return i * cols + j; }
 
-namespace trl::sycl {
+namespace trl::Sycl {
 // TODO: cols_ should be an unsigned int
 /** @brief SYCL block view backed by USM shared memory.
  *
  *  Backend specifics:
- *  - Uses a ::sycl::queue for all operations; kernels are enqueued on that queue.
+ *  - Uses a sycl::queue for all operations; kernels are enqueued on that queue.
  *  - Assumes an in-order queue for correctness of dependent operations.
  *    If an out-of-order queue is used, explicit events are required.
  *  - Methods typically do not wait; synchronization is deferred to the caller.
@@ -29,7 +29,7 @@ public:
   using EntryType = T;
   using MatrixBlockView = MatrixBlockView<T, cols_>;
 
-  BlockView(::sycl::queue* queue, T* data, std::size_t rows)
+  BlockView(sycl::queue* queue, T* data, std::size_t rows)
       : data(data)
       , q(queue)
       , rows_(rows)
@@ -37,7 +37,7 @@ public:
     // Assumes an in-order queue for implicit dependency ordering.
 
     // Query once at startup
-    size_t num_cu = q->get_device().get_info<::sycl::info::device::max_compute_units>();
+    size_t num_cu = q->get_device().get_info<sycl::info::device::max_compute_units>();
 
     size_t num_groups = num_cu * 6;
     global_size = local_size * num_groups;
@@ -82,7 +82,7 @@ public:
         auto reductions = make_reductions(c, std::make_index_sequence<cols_ * cols_>{});
         std::apply(
             [&](auto&... rs) {
-              cgh.parallel_for(::sycl::range<1>{n}, rs..., [=](::sycl::id<1> id, auto&... reducers) {
+              cgh.parallel_for(sycl::range<1>{n}, rs..., [=](sycl::id<1> id, auto&... reducers) {
                 const std::size_t k = id[0];
                 combine_reductions(a, b, m, k, std::make_index_sequence<cols_ * cols_>{}, reducers...);
               });
@@ -90,7 +90,7 @@ public:
             reductions);
       }
       else {
-        cgh.parallel_for(::sycl::range<1>{n}, [=](::sycl::item<1> it) {
+        cgh.parallel_for(sycl::range<1>{n}, [=](sycl::item<1> it) {
           const auto tid = it[0];
 
           alignas(64) T C_local[cols_][cols_] = {};
@@ -99,7 +99,7 @@ public:
 
           for (unsigned int i = 0; i < m; ++i)
             for (unsigned int j = 0; j < m; ++j) {
-              ::sycl::atomic_ref<T, ::sycl::memory_order::relaxed, ::sycl::memory_scope::device> atomic_c(c[to_linear_index(m, i, j)]);
+              sycl::atomic_ref<T, sycl::memory_order::relaxed, sycl::memory_scope::device> atomic_c(c[to_linear_index(m, i, j)]);
               atomic_c += C_local[i][j];
             }
         });
@@ -116,7 +116,7 @@ public:
       auto* b = B.data;
       auto* c = C.data;
 
-      cgh.parallel_for(::sycl::range{n}, [=](::sycl::id<1> id) {
+      cgh.parallel_for(sycl::range{n}, [=](sycl::id<1> id) {
         auto tid = id[0];
 
         T a_private[cols_];
@@ -143,7 +143,7 @@ public:
       auto* b = B.data;
       auto* c = C.data;
 
-      cgh.parallel_for(::sycl::range{n}, [=](::sycl::id<1> id) {
+      cgh.parallel_for(sycl::range{n}, [=](sycl::id<1> id) {
         auto tid = id[0];
 
         T a_private[cols_];
@@ -170,7 +170,7 @@ public:
       auto* b = B.data;
       auto* c = C.data;
 
-      cgh.parallel_for(::sycl::range{n}, [=](::sycl::id<1> id) {
+      cgh.parallel_for(sycl::range{n}, [=](sycl::id<1> id) {
         auto tid = id[0];
 
         T a_private[cols_];
@@ -196,7 +196,7 @@ public:
       auto* a = data;
       auto* b = B.data;
 
-      cgh.parallel_for(::sycl::range{n}, [=](::sycl::id<1> id) {
+      cgh.parallel_for(sycl::range{n}, [=](sycl::id<1> id) {
         auto tid = id[0];
         for (std::size_t i = 0; i < cols_; ++i) a[tid * cols_ + i] -= b[tid * cols_ + i];
       });
@@ -210,12 +210,12 @@ public:
     const std::size_t K = rows();
     const std::size_t M = cols_;
 
-    q->submit([&](::sycl::handler& cgh) {
+    q->submit([&](sycl::handler& cgh) {
       auto* a = data; // this
       auto* b = B.data;
       auto* c = C.data;
 
-      cgh.parallel_for(::sycl::range<1>{K}, [=](::sycl::id<1> id) {
+      cgh.parallel_for(sycl::range<1>{K}, [=](sycl::id<1> id) {
         const std::size_t k = id[0];
 
         T brow[cols_];
@@ -252,7 +252,7 @@ private:
   template <std::size_t... Is>
   static auto make_reductions(T* c, std::index_sequence<Is...>)
   {
-    return std::make_tuple(::sycl::reduction(c + Is, T{0}, ::sycl::plus<T>{}, ::sycl::property_list{::sycl::property::reduction::initialize_to_identity{}})...);
+    return std::make_tuple(sycl::reduction(c + Is, T{0}, sycl::plus<T>{}, sycl::property_list{sycl::property::reduction::initialize_to_identity{}})...);
   }
 
   template <std::size_t... Is, class... Reducers>
@@ -261,9 +261,9 @@ private:
     ((reducers.combine(a[to_linear_index(m, k, Is / cols_)] * b[to_linear_index(m, k, Is % cols_)])), ...);
   }
 
-  ::sycl::queue* q;
+  sycl::queue* q;
   const std::size_t rows_;
 
   std::size_t global_size{}; // for dot product
 };
-} // namespace trl::sycl
+} // namespace trl::Sycl

@@ -1,39 +1,31 @@
 #pragma once
 
-#include <algorithm>
 #include <cstdlib>
-#include <fstream>
-#include <sstream>
 #include <stdexcept>
 #include <string>
-#include <vector>
 
 #include <Eigen/Core>
 #include <unsupported/Eigen/SparseExtra>
 #include <unsupported/Eigen/src/SparseExtra/MarketIO.h>
 
-#include "trl/impl/openmp/evp_base.hh"
-#include "trl/impl/openmp/util.hh"
+#include "trl/common.hh"
+#include "trl/openmp/backend.hh"
 
-// CSR-based eigenvalue problem that inherits from EVPBase
+// CSR-based eigenvalue problem
 template <class T, unsigned int bs>
-class CSREVP : public trl::openmp::EVPBase<T, bs> {
+class StandardEVPOperator : public trl::EuclideanDot<trl::openmp::Backend<T, bs>> {
 public:
-  using Base = trl::openmp::EVPBase<T, bs>;
+  using Backend = trl::openmp::Backend<T, bs>;
 
-  CSREVP(const std::string& matrix_file)
-      : Base(0) // N will be set after loading
+  StandardEVPOperator(const std::string& matrix_file)
   {
     Eigen::loadMarket(A, matrix_file);
 
     if (A.rows() != A.cols()) throw std::runtime_error("CSREVP requires a square matrix");
-
-    // Set the matrix dimension in the base class and reinitialize Vtemp
-    this->N = A.rows();
-    this->Vtemp.emplace(this->create_multivector(this->N, bs));
+    N = A.rows();
   }
 
-  void apply(typename Base::BlockView X, typename Base::BlockView Y)
+  void apply(typename Backend::Multivector::BlockView X, typename Backend::Multivector::BlockView Y)
   {
     constexpr auto storage = bs == 1 ? Eigen::ColMajor : Eigen::RowMajor;
 
@@ -43,21 +35,23 @@ public:
     Ymap = A.template selfadjointView<Eigen::Lower>() * Xmap;
   }
 
+  std::size_t size() const { return N; }
+
 private:
   Eigen::SparseMatrix<T> A;
+  std::size_t N{};
 };
 
 template <class T, unsigned int bs>
-class CSRGeneralizedEVP : public trl::openmp::EVPBase<T, bs> {
+class GeneralizedEVPOperator {
   using SparseMatrix = Eigen::SparseMatrix<T>;
   using Solver = Eigen::SparseLU<SparseMatrix>;
   constexpr static auto storage = bs == 1 ? Eigen::ColMajor : Eigen::RowMajor;
 
 public:
-  using Base = trl::openmp::EVPBase<T, bs>;
+  using Backend = trl::openmp::Backend<T, bs>;
 
-  CSRGeneralizedEVP(const std::string& matrix_file_A, const std::string& matrix_file_B, double shift)
-      : Base(0) // N will be set after loading
+  GeneralizedEVPOperator(const std::string& matrix_file_A, const std::string& matrix_file_B, double shift)
   {
     SparseMatrix A;
     Eigen::loadMarket(A, matrix_file_A);
@@ -70,35 +64,37 @@ public:
     SpMat mat = matA - shift * matB;
     solver.isSymmetric(true);
     solver.compute(mat);
-
-    // Set the matrix dimension in the base class and reinitialize Vtemp
-    this->N = A.rows();
-    this->Vtemp.emplace(this->create_multivector(this->N, bs));
-    tmp.resize(this->N, bs);
   }
 
-  void apply(typename Base::BlockView X, typename Base::BlockView Y) override
+  void apply(typename Backend::Multivector::BlockView X, typename Backend::Multivector::BlockView Y)
   {
     Eigen::Map<Eigen::Matrix<T, Eigen::Dynamic, bs, storage>> Xmap(X.data_, B.rows(), bs);
     Eigen::Map<Eigen::Matrix<T, Eigen::Dynamic, bs, storage>> Ymap(Y.data_, B.rows(), bs);
 
     tmp = B.template selfadjointView<Eigen::Lower>() * Xmap;
-    Ymap = solver.solve(tmp);
+
+    // SparseLU::solve requires a column-major destination, but the multivector
+    // blocks are row-major for bs > 1, so solve into a temp and copy over.
+    Ytmp = solver.solve(tmp);
+    Ymap = Ytmp;
   }
 
-  void dot(typename Base::BlockView V, typename Base::BlockView W, typename Base::BlockMatrixBlockView R) override
+  void dot(typename Backend::Multivector::BlockView V, typename Backend::Multivector::BlockView W, typename Backend::BlockMatrix::BlockView R)
   {
     Eigen::Map<Eigen::Matrix<T, Eigen::Dynamic, bs, storage>> Wmap(W.data_, B.rows(), bs);
 
     tmp = B.template selfadjointView<Eigen::Lower>() * Wmap;
 
-    typename Base::BlockView Tview(tmp.data(), B.rows());
+    typename Backend::Multivector::BlockView Tview(tmp.data(), B.rows());
     V.dot(Tview, R);
   }
+
+  std::size_t size() const { return B.rows(); }
 
 private:
   Solver solver;
   SparseMatrix B;
 
   Eigen::Matrix<T, Eigen::Dynamic, bs, storage> tmp;
+  Eigen::Matrix<T, Eigen::Dynamic, bs, Eigen::ColMajor> Ytmp; // column-major staging buffer for the LU solve
 };

@@ -2,23 +2,22 @@
 
 #include <cstddef>
 
-#include "trl/impl/openmp/evp_base.hh"
+#include "trl/common.hh"
+#include "trl/openmp/backend.hh"
 
-namespace trl::openmp::tests {
 template <class T, unsigned int bs>
-class Laplace1DEVP : public trl::openmp::EVPBase<T, bs> {
+class Laplace1DEVPOperator : public trl::EuclideanDot<trl::openmp::Backend<T, bs>> {
 public:
-  using Base = trl::openmp::EVPBase<T, bs>;
-  using BlockView = typename Base::BlockView;
+  using BlockView = typename trl::openmp::Backend<T, bs>::Multivector::BlockView;
 
-  explicit Laplace1DEVP(std::size_t n)
-      : Base(n)
+  explicit Laplace1DEVPOperator(std::size_t n)
+      : n_(n)
   {
   }
 
   void apply(BlockView X, BlockView Y)
   {
-    const std::size_t n = this->size();
+    const std::size_t n = size();
 #pragma omp parallel for
     for (std::size_t k = 0; k < n; ++k) {
       for (unsigned int i = 0; i < bs; ++i) {
@@ -29,5 +28,9 @@ public:
       }
     }
   }
+
+  std::size_t size() const { return n_; }
+
+private:
+  std::size_t n_;
 };
-} // namespace trl::openmp::tests

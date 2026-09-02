@@ -6,7 +6,7 @@
 
 #include <sycl/sycl.hpp>
 
-namespace trl::sycl {
+namespace trl::Sycl {
 /** @brief SYCL matrix block view backed by USM shared memory.
  *
  *  Backend specifics:
@@ -21,7 +21,7 @@ public:
   static constexpr unsigned int rows = bs;
   static constexpr unsigned int cols = bs;
 
-  MatrixBlockView(::sycl::queue* queue, T* data)
+  MatrixBlockView(sycl::queue* queue, T* data)
       : data(data)
       , queue(queue)
   {
@@ -83,7 +83,7 @@ public:
   T* data;
 
 private:
-  ::sycl::queue* queue;
+  sycl::queue* queue;
 };
 
-} // namespace trl::sycl
+} // namespace trl::Sycl

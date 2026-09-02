@@ -34,18 +34,18 @@ std::string type_str()
 }
 
 // Helper to verify orthogonality of V blocks
-template <trl::Eigenproblem EVP, class TestHelper>
-bool check_orthogonality(EVP& evp, TestHelper& helper, typename EVP::BlockMultivector& V, typename EVP::Scalar tolerance, bool verbose)
+template <trl::Backend B>
+bool check_orthogonality(B& backend, typename B::Multivector& V, typename B::Scalar tolerance, bool verbose)
 {
-  using Scalar = typename EVP::Scalar;
-  constexpr auto bs = EVP::blocksize;
+  using Scalar = typename B::Scalar;
+  constexpr auto bs = B::blocksize;
 
   if (verbose) std::cout << "  Checking orthogonality of V blocks..." << std::endl;
   Scalar max_offdiag = 0;
   Scalar max_diag_error = 0;
   int max_offdiag_i = -1, max_offdiag_j = -1;
 
-  auto temp = evp.create_blockmatrix(1, 1);
+  auto temp = backend.make_blockmatrix(1, 1);
   auto temp_block = temp.block_view(0, 0);
 
   for (unsigned int i = 0; i < V.blocks(); ++i) {
@@ -53,14 +53,15 @@ bool check_orthogonality(EVP& evp, TestHelper& helper, typename EVP::BlockMultiv
 
     // Check V_i^T * V_i = I
     Vi.dot(Vi, temp_block);
-    helper.sync();
-    auto temp_block_host = helper.to_host_data(temp_block);
 
-    for (unsigned int r = 0; r < bs; ++r) {
-      for (unsigned int c = 0; c < bs; ++c) {
-        auto val = temp_block_host[r * bs + c];
-        if (r == c) max_diag_error = std::max(max_diag_error, std::abs(val - Scalar(1.0)));
-        else max_offdiag = std::max(max_offdiag, std::abs(val));
+    {
+      auto temp_block_host = backend.host_block(temp_block, Access::Read);
+      for (unsigned int r = 0; r < bs; ++r) {
+        for (unsigned int c = 0; c < bs; ++c) {
+          auto val = temp_block_host[r * bs + c];
+          if (r == c) max_diag_error = std::max(max_diag_error, std::abs(val - Scalar(1.0)));
+          else max_offdiag = std::max(max_offdiag, std::abs(val));
+        }
       }
     }
 
@@ -68,13 +69,13 @@ bool check_orthogonality(EVP& evp, TestHelper& helper, typename EVP::BlockMultiv
     for (unsigned int j = 0; j < i; ++j) {
       auto Vj = V.block_view(j);
       Vi.dot(Vj, temp_block);
-      helper.sync();
-      temp_block_host = helper.to_host_data(temp_block);
+
+      auto temp_block_host = backend.host_block(temp_block, Access::Read);
       for (unsigned int k = 0; k < bs * bs; ++k) {
         if (std::abs(temp_block_host[k]) > max_offdiag) {
           max_offdiag = std::abs(temp_block_host[k]);
-          max_offdiag_i = i;
-          max_offdiag_j = j;
+          max_offdiag_i = static_cast<int>(i);
+          max_offdiag_j = static_cast<int>(j);
         }
       }
     }
