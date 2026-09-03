@@ -15,7 +15,7 @@ namespace trl::test {
  *  The generator is seeded per call, so a given @p seed always produces the same
  *  block regardless of backend.
  */
-template <trl::Backend B>
+template <trl::BackendConcept B>
 void set_random(B& backend, typename B::Multivector::BlockView V, std::uint_fast32_t seed = std::mt19937::default_seed)
 {
   std::mt19937 rng(seed);
@@ -26,7 +26,7 @@ void set_random(B& backend, typename B::Multivector::BlockView V, std::uint_fast
 }
 
 /** @brief Euclidean norm of a multivector block. */
-template <trl::Backend B>
+template <trl::BackendConcept B>
 typename B::Scalar norm(B& backend, typename B::Multivector::BlockView V)
 {
   auto host = backend.host_block(V, Access::Read);

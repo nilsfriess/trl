@@ -22,7 +22,7 @@ namespace trl {
  *  @tparam Reorth  Reorthogonalization strategy. Must satisfy
  *          \ref trl::ReorthogonalizationStrategy. Defaults to \ref trl::ModifiedGS.
  */
-template <Backend B, Operator<B> O, class Reorth = ModifiedGS>
+template <BackendConcept B, OperatorConcept<B> O, class Reorth = ModifiedGS>
 // requires ReorthogonalizationStrategy<Reorth, EVP, typename EVP::BlockMultivector>
 class BlockLanczos {
 public:
@@ -174,7 +174,7 @@ public:
         k += 1;
       }
       else {
-        TRL_TODO("Should this every happen?");
+        TRL_TODO("Should this ever happen?");
         // We've exhausted the Krylov subspace (k+1 == ncv/blocksize)
         // We cannot extend further, so let's just return.
         break;

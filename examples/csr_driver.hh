@@ -58,7 +58,7 @@ inline bool parse_args(int argc, char* argv[], CsrTestOptions& opts)
 }
 
 /** @brief Runs the comparison. Returns a process exit code. */
-template <trl::Backend B, trl::Operator<B> O>
+template <trl::BackendConcept B, OperatorConcept<B> O>
 int run_csr_test(B& backend, std::shared_ptr<O> op, const CsrTestOptions& opts)
 {
   using Scalar = typename B::Scalar;

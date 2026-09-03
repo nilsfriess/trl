@@ -3,16 +3,7 @@
 #include <concepts>
 #include <cstddef>
 #include <cstdlib>
-#include <iostream>
 #include <span>
-
-inline void todo_impl(const char* file, int line, const char* message)
-{
-  std::cerr << file << ":" << line << ": TODO: " << message << std::endl;
-  std::abort();
-}
-
-#define TRL_TODO(message) todo_impl(__FILE__, __LINE__, message)
 
 namespace trl {
 
@@ -132,23 +123,23 @@ concept MultivectorConcept = requires(BMV bmv, std::size_t i) {
   requires BlockMatrixConcept<typename BMV::BlockMatrix>;
 };
 
-/** @brief Concept for the scoped host mirror returned by Backend::host_block
- *
- *  Exposes the mirrored block as contiguous row-major storage of
- *  blocksize x blocksize entries. The handle is neither copyable nor movable:
- *  its lifetime is the transfer window.
- */
-template <class H, class T>
-concept HostBlockHandle = requires(H& h, const H& ch, std::size_t i) {
-  { h.data() } -> std::same_as<T*>;
-  { ch.data() } -> std::same_as<const T*>;
-  { h[i] } -> std::same_as<T&>;
-  { ch[i] } -> std::same_as<const T&>;
-  { ch.size() } -> std::same_as<std::size_t>;
-};
+// /** @brief Concept for the scoped host mirror returned by Backend::host_block
+//  *
+//  *  Exposes the mirrored block as contiguous row-major storage of
+//  *  blocksize x blocksize entries. The handle is neither copyable nor movable:
+//  *  its lifetime is the transfer window.
+//  */
+// template <class H, class T>
+// concept HostBlockHandle = requires(H& h, const H& ch, std::size_t i) {
+//   { h.data() } -> std::same_as<T*>;
+//   { ch.data() } -> std::same_as<const T*>;
+//   { h[i] } -> std::same_as<T&>;
+//   { ch[i] } -> std::same_as<const T&>;
+//   { ch.size() } -> std::same_as<std::size_t>;
+// };
 
 template <class B>
-concept Backend = requires(B& b, std::size_t n, unsigned int cols, unsigned int br, unsigned int bc) {
+concept BackendConcept = requires(B& b, std::size_t n, unsigned int cols, unsigned int br, unsigned int bc) {
   typename B::Scalar;
   typename B::Multivector;
   typename B::BlockMatrix;
@@ -162,21 +153,19 @@ concept Backend = requires(B& b, std::size_t n, unsigned int cols, unsigned int 
   // Scoped host mirror of a small block. Reads on construction and/or writes
   // back on destruction according to the Access mode, so the device-side value
   // is only guaranteed current once the handle has gone out of scope.
-  typename B::HostBlock;
-  { b.host_block(std::declval<typename B::BlockMatrix::BlockView>(), Access::ReadWrite) } -> std::same_as<typename B::HostBlock>;
-  requires HostBlockHandle<typename B::HostBlock, typename B::Scalar>;
+  // typename B::template HostBlock<std::size_t>;
+  { b.host_block(std::declval<typename B::BlockMatrix::BlockView>(), Access::ReadWrite) }; // -> std::same_as<typename B::HostBlock>;
+  // requires HostBlockHandle<typename B::HostBlock, typename B::Scalar>;
 
-  // The same mirror over a multivector block, whose extent is only known at run time.
-  typename B::HostVectors;
-  { b.host_block(std::declval<typename B::Multivector::BlockView>(), Access::ReadWrite) } -> std::same_as<typename B::HostVectors>;
-  requires HostBlockHandle<typename B::HostVectors, typename B::Scalar>;
+  // The same mirror over a multivector block
+  { b.host_block(std::declval<typename B::Multivector::BlockView>(), Access::ReadWrite) }; // -> std::same_as<typename B::HostBlock>;
 
   requires MultivectorConcept<typename B::Multivector>;
   requires BlockMatrixConcept<typename B::BlockMatrix>;
 };
 
 template <class O, class B>
-concept Operator = Backend<B> && requires(O& op, typename B::Multivector::BlockView x, typename B::BlockMatrix::BlockView R) {
+concept OperatorConcept = BackendConcept<B> && requires(O& op, typename B::Multivector::BlockView x, typename B::BlockMatrix::BlockView R) {
   { op.apply(x, x) } -> std::same_as<void>;
   { op.dot(x, x, R) } -> std::same_as<void>;
   { op.size() } -> std::same_as<std::size_t>;

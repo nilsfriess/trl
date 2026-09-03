@@ -34,7 +34,7 @@ std::string type_str()
 }
 
 // Helper to verify orthogonality of V blocks
-template <trl::Backend B>
+template <trl::BackendConcept B>
 bool check_orthogonality(B& backend, typename B::Multivector& V, typename B::Scalar tolerance, bool verbose)
 {
   using Scalar = typename B::Scalar;

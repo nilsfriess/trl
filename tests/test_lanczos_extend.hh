@@ -9,7 +9,7 @@
 #include "helpers.hh"
 #include "test_helper.hh"
 
-template <trl::Backend B, trl::Operator<B> O>
+template <trl::BackendConcept B, trl::OperatorConcept<B> O>
 bool test_lanczos_extend(B& backend, std::shared_ptr<O> op, typename B::Scalar tolerance, bool verbose)
 {
   using Scalar = typename B::Scalar;

@@ -12,7 +12,7 @@
 #include "helpers.hh"
 #include "test_helper.hh"
 
-template <trl::Backend B, trl::Operator<B> O>
+template <trl::BackendConcept B, trl::OperatorConcept<B> O>
 bool test_lanczos_convergence(B& backend, std::shared_ptr<O> op, const std::vector<typename B::Scalar>& exact_eigenvalues, typename B::Scalar tolerance = 1e-8)
 {
   using Scalar = typename B::Scalar;
