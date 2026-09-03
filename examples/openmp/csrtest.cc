@@ -9,7 +9,7 @@
 #include "csrevp.hh"
 #include "trl/openmp/backend.hh"
 
-constexpr unsigned int BLOCKSIZE = 4;
+constexpr unsigned int BLOCKSIZE = 1;
 
 int main(int argc, char* argv[])
 {
