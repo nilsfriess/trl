@@ -55,16 +55,19 @@ struct Backend {
     std::size_t size_;
   };
 
-  using HostBlock = HostMirror;
-  using HostVectors = HostMirror;
-
   Multivector make_multivector(std::size_t n, unsigned int cols) const { return {n, cols}; }
   BlockMatrix make_blockmatrix(unsigned int br, unsigned int bc) const { return {br, bc}; }
 
   void sync() const {}
 
-  HostBlock host_block(typename BlockMatrix::BlockView B, [[maybe_unused]] Access access) const { return {B.data_, bs * bs}; }
+  HostMirror host_block(BlockMatrix& M, [[maybe_unused]] Access access) const
+  {
+    const auto n_total = M.block_rows() * M.block_cols() * blocksize * blocksize;
+    return {M.data, n_total};
+  }
 
-  HostVectors host_block(typename Multivector::BlockView V, [[maybe_unused]] Access access) const { return {V.data_, V.rows() * V.cols()}; }
+  HostMirror host_block(typename BlockMatrix::BlockView B, [[maybe_unused]] Access access) const { return {B.data_, bs * bs}; }
+
+  HostMirror host_block(typename Multivector::BlockView V, [[maybe_unused]] Access access) const { return {V.data_, V.rows() * V.cols()}; }
 };
 } // namespace trl::openmp

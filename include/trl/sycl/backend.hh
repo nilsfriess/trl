@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <array>
+#include <span>
 
 namespace trl::Sycl {
 /** @brief SYCL backend.
@@ -27,14 +28,20 @@ struct Backend {
    *  @p access, so the device-side block is only current once the handle has
    *  gone out of scope.
    */
+  template <std::size_t Extent = std::dynamic_extent>
   class HostBlock {
   public:
-    HostBlock(sycl::queue queue, Access access, BlockMatrix::BlockView B)
+    HostBlock(sycl::queue queue, Access access, Scalar* device_ptr, std::size_t extent)
         : queue(queue)
         , access(access)
-        , device_ptr(B.data)
+        , device_ptr(device_ptr)
     {
-      if (access == Access::Read or access == Access::ReadWrite) queue.memcpy(host_data.data(), device_ptr, sizeof(Scalar) * bs * bs).wait();
+      if constexpr (Extent == std::dynamic_extent) host_vector.resize(extent);
+
+      if (access == Access::Read or access == Access::ReadWrite) {
+        if constexpr (Extent == std::dynamic_extent) queue.memcpy(host_vector.data(), device_ptr, sizeof(Scalar) * extent).wait();
+        else queue.memcpy(host_array.data(), device_ptr, sizeof(Scalar) * Extent).wait();
+      }
     }
 
     HostBlock(const HostBlock&) = delete;
@@ -44,58 +51,48 @@ struct Backend {
 
     ~HostBlock()
     {
-      if (access == Access::Write or access == Access::ReadWrite) queue.memcpy(device_ptr, host_data.data(), sizeof(Scalar) * bs * bs).wait();
+      if (access == Access::Write or access == Access::ReadWrite) {
+        if constexpr (Extent == std::dynamic_extent) queue.memcpy(device_ptr, host_vector.data(), sizeof(Scalar) * host_vector.size()).wait();
+        else queue.memcpy(device_ptr, host_array.data(), sizeof(Scalar) * Extent).wait();
+      }
     }
 
-    Scalar& operator[](std::size_t i) { return host_data[i]; }
-    const Scalar& operator[](std::size_t i) const { return host_data[i]; }
+    Scalar& operator[](std::size_t i)
+    {
+      if constexpr (Extent == std::dynamic_extent) return host_vector[i];
+      else return host_array[i];
+    }
 
-    Scalar* data() { return host_data.data(); }
-    const Scalar* data() const { return host_data.data(); }
+    const Scalar& operator[](std::size_t i) const
+    {
+      if constexpr (Extent == std::dynamic_extent) return host_vector[i];
+      else return host_array[i];
+    }
 
-    std::size_t size() const { return host_data.size(); }
+    Scalar* data()
+    {
+      if constexpr (Extent == std::dynamic_extent) return host_vector.data();
+      else return host_array.data();
+    }
+
+    const Scalar* data() const
+    {
+      if constexpr (Extent == std::dynamic_extent) return host_vector.data();
+      else return host_array.data();
+    }
+
+    std::size_t size() const
+    {
+      if constexpr (Extent == std::dynamic_extent) return host_vector.size();
+      else return host_array.size();
+    }
 
   private:
     sycl::queue queue;
     Access access;
     Scalar* device_ptr;
-    std::array<Scalar, bs * bs> host_data;
-  };
-
-  /** @brief Host mirror of a multivector block.
-   *
-   *  A multivector block is rows x bs and can be far too large to stage, but it
-   *  lives in USM shared memory, so the mirror aliases it directly. The queue is
-   *  drained on construction: without that, host reads and writes here would race
-   *  against kernels still in flight.
-   */
-  class HostVectors {
-  public:
-    HostVectors(sycl::queue queue, [[maybe_unused]] Access access, Multivector::BlockView V)
-        : ptr(V.data)
-        , size_(V.rows() * V.cols())
-    {
-      queue.wait();
-    }
-
-    HostVectors(const HostVectors&) = delete;
-    HostVectors(HostVectors&&) = delete;
-    HostVectors& operator=(const HostVectors&) = delete;
-    HostVectors& operator=(HostVectors&&) = delete;
-
-    ~HostVectors() = default;
-
-    Scalar& operator[](std::size_t i) { return ptr[i]; }
-    const Scalar& operator[](std::size_t i) const { return ptr[i]; }
-
-    Scalar* data() { return ptr; }
-    const Scalar* data() const { return ptr; }
-
-    std::size_t size() const { return size_; }
-
-  private:
-    Scalar* ptr;
-    std::size_t size_;
+    std::array<Scalar, bs * bs> host_array;
+    std::vector<Scalar> host_vector;
   };
 
   explicit Backend(sycl::queue queue)
@@ -107,9 +104,28 @@ struct Backend {
   BlockMatrix make_blockmatrix(unsigned int br, unsigned int bc) const { return {queue, br, bc}; }
   void sync() { queue.wait(); }
 
-  HostBlock host_block(BlockMatrix::BlockView B, Access access) { return {queue, access, B}; }
+  HostBlock<std::dynamic_extent> host_block(BlockMatrix &M, Access access)
+  {
+    const auto n_total = M.block_rows() * M.block_cols() * blocksize * blocksize;
+    return {queue, access, M.data(), n_total};
+  }
 
-  HostVectors host_block(Multivector::BlockView V, Access access) { return {queue, access, V}; }
+  HostBlock<bs * bs> host_block(BlockMatrix::BlockView B, Access access)
+  {
+    // Here we know the size at compile time, so we can use the HostBlock
+    // variant that does not allocate memory at runtime
+    return {queue, access, B.data, bs * bs};
+  }
+
+  HostBlock<std::dynamic_extent> host_block(Multivector::BlockView V, Access access)
+  {
+    // Here we do not know the size at compile time, so we have to use the
+    // dynamic_extent variant that does allocate memory at runtime.
+    // This accessor is supposed to be only use for initialisation
+    // anyway, so that should be fine.
+    return {queue, access, V.data, V.rows() * V.cols()};
+  }
+
 private:
   sycl::queue queue;
 };

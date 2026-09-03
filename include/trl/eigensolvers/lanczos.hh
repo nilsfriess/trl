@@ -1,6 +1,7 @@
 #pragma once
 
 #include "../concepts.hh"
+#include "../helpers.hh"
 #include "params.hh"
 #include "reorthogonalization.hh"
 
@@ -278,11 +279,14 @@ private:
     // Convert block matrix to dense Eigen matrix
     Eigen::Matrix<Scalar, Eigen::Dynamic, Eigen::Dynamic> B_dense(n_total, n_total);
 
-    for (std::size_t i = 0; i < T.block_rows(); ++i) {
-      for (std::size_t j = 0; j < T.block_cols(); ++j) {
-        auto host_block = backend.host_block(T.block_view(i, j), Access::Read);
-        for (unsigned int bi = 0; bi < blocksize; ++bi)
-          for (unsigned int bj = 0; bj < blocksize; ++bj) B_dense(i * blocksize + bi, j * blocksize + bj) = host_block[bi * blocksize + bj];
+    {
+      auto T_host = backend.host_block(T, Access::Read);
+      for (std::size_t i = 0; i < T.block_rows(); ++i) {
+        for (std::size_t j = 0; j < T.block_cols(); ++j) {
+          auto* T_host_block = T_host.data() + (i * T.block_cols() + j) * blocksize * blocksize;
+          for (unsigned int bi = 0; bi < blocksize; ++bi)
+            for (unsigned int bj = 0; bj < blocksize; ++bj) B_dense(i * blocksize + bi, j * blocksize + bj) = T_host_block[bi * blocksize + bj];
+        }
       }
     }
 
@@ -301,13 +305,16 @@ private:
     for (std::size_t i = 0; i < n_total; ++i) eigenvalues[i] = solver.eigenvalues()(indices[i]);
 
     // Store eigenvectors in BlockMatrix format (also reversed to match eigenvalues)
-    for (std::size_t i = 0; i < T.block_rows(); ++i) {
-      for (std::size_t j = 0; j < T.block_cols(); ++j) {
-        auto host_block = backend.host_block(Y.block_view(i, j), Access::Write);
-        for (unsigned int bi = 0; bi < blocksize; ++bi) {
-          for (unsigned int bj = 0; bj < blocksize; ++bj) {
-            // Reverse column order to match descending eigenvalue order
-            host_block[bi * blocksize + bj] = solver.eigenvectors()(i * blocksize + bi, indices[j * blocksize + bj]);
+    {
+      auto Y_host = backend.host_block(Y, Access::Write);
+      for (std::size_t i = 0; i < Y.block_rows(); ++i) {
+        for (std::size_t j = 0; j < Y.block_cols(); ++j) {
+          auto* Y_host_block = Y_host.data() + (i * Y.block_cols() + j) * blocksize * blocksize;
+          for (unsigned int bi = 0; bi < blocksize; ++bi) {
+            for (unsigned int bj = 0; bj < blocksize; ++bj) {
+              // Reverse column order to match descending eigenvalue order
+              Y_host_block[bi * blocksize + bj] = solver.eigenvectors()(i * blocksize + bi, indices[j * blocksize + bj]);
+            }
           }
         }
       }
