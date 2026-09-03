@@ -1,6 +1,7 @@
 #pragma once
 
 #include "matrixblockview.hh"
+#include "trl/openmp/backend.hh"
 #include "util.hh"
 
 #include <algorithm>
@@ -58,6 +59,9 @@ public:
   }
 
 private:
+  template <class, unsigned int>
+  friend struct Backend;
+
   unsigned int block_rows_;
   unsigned int block_cols_;
 

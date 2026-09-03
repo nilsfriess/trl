@@ -1,10 +1,17 @@
 #pragma once
 
 #include <concepts>
+#include <cstddef>
+#include <cstdlib>
 #include <span>
-#include <vector>
 
 namespace trl {
+
+enum class Access {
+  Read,
+  Write,
+  ReadWrite,
+};
 
 /** @brief Concept for matrix block views
  *
@@ -28,13 +35,9 @@ concept MatrixBlockViewConcept = requires(MBV mbv, const MBV& other, std::span<t
   typename MBV::EntryType;
 
   { mbv.copy_from(other) } -> std::same_as<void>;
-
   { mbv.copy_from_transpose(other) } -> std::same_as<void>;
-
   { mbv.set_zero() } -> std::same_as<void>;
-
   { mbv.set_diagonal(diag) } -> std::same_as<void>;
-
   { mbv.mult(other, other) } -> std::same_as<void>;
 };
 
@@ -57,9 +60,7 @@ concept BlockMatrixConcept = requires(BM bm, std::size_t i, std::size_t j) {
   typename BM::BlockView;
 
   { bm.block_rows() } -> std::same_as<std::size_t>;
-
   { bm.block_cols() } -> std::same_as<std::size_t>;
-
   { bm.block_view(i, j) } -> std::same_as<typename BM::BlockView>;
 
   requires MatrixBlockViewConcept<typename BM::BlockView>;
@@ -83,25 +84,17 @@ concept BlockMatrixConcept = requires(BM bm, std::size_t i, std::size_t j) {
  *  Operations are expected to be dense, block-sized linear algebra kernels.
  */
 template <class BV>
-concept BlockVectorView = requires(BV bv, const BV& other, const BV::MatrixBlockView& W) {
+concept MultivectorBlockViewConcept = requires(BV bv, const BV& other, const BV::MatrixBlockView& W) {
   typename BV::EntryType;
 
   { bv.set_zero() } -> std::same_as<void>;
-
   { bv.rows() } -> std::same_as<std::size_t>;
-
   { bv.cols() } -> std::same_as<std::size_t>;
-
   { bv.copy_from(other) } -> std::same_as<void>;
-
   { bv -= other } -> std::same_as<BV&>;
-
   { bv.mult_add(W, other) } -> std::same_as<void>;
-
   { bv.mult(W, other) } -> std::same_as<void>;
-
   { bv.mult_transpose(W, other) } -> std::same_as<void>;
-
   { bv.subtract_product(other, W) } -> std::same_as<void>;
 };
 
@@ -117,74 +110,65 @@ concept BlockVectorView = requires(BV bv, const BV& other, const BV::MatrixBlock
  *  - BlockMatrix satisfies BlockMatrixConcept
  */
 template <class BMV>
-concept BlockMultiVector = requires(BMV bmv, std::size_t i) {
+concept MultivectorConcept = requires(BMV bmv, std::size_t i) {
   typename BMV::Scalar;
   typename BMV::BlockView;
   typename BMV::BlockMatrix;
-
   { BMV::blocksize } -> std::convertible_to<unsigned int>;
 
   { bmv.block_view(i) } -> std::same_as<typename BMV::BlockView>;
+  { bmv.blocks() } -> std::same_as<std::size_t>;
 
-  requires BlockVectorView<typename BMV::BlockView>;
-
+  requires MultivectorBlockViewConcept<typename BMV::BlockView>;
   requires BlockMatrixConcept<typename BMV::BlockMatrix>;
 };
 
-/** @brief Concept for eigenvalue problems
- *
- *  An Eigenproblem bundles the operator, inner product, and small dense solver
- *  needed by the block Lanczos algorithm. It also provides factory methods for
- *  backend-specific multivectors and block matrices.
- *
- *  @par Requirements
- *  - types: Scalar, BlockMultivector (satisfies BlockMultiVector)
- *  - blocksize consistent with BlockMultivector::blocksize
- *  - apply: Y = A * X (or transformed operator)
- *  - dot: B = X^T * Y (or B-inner product)
- *  - orthonormalize: X <- X * R^{-1}, output R (upper triangular)
- *  - size: global problem dimension
- *  - create_multivector, create_blockmatrix: factory methods
- *  - solve_small_dense: solve projected problem, return converged count
- *  - get_current_eigenvalues, get_current_eigenvectors: latest Ritz data
- *  - get_eigenvalues_block: block of eigenvalues used for restart
- *
- *  @par Semantics
- *  For standard problems, dot computes X^T * Y. For generalized problems, dot
- *  may implement X^T * B * Y. The orthonormalize routine should leave R such
- *  that X_old = X_new * R, with R upper triangular.
- */
-template <class EVP>
-concept Eigenproblem =
-    requires(EVP& evp, typename EVP::BlockMultivector::BlockView x, typename EVP::BlockMultivector::BlockMatrix::BlockView B, typename EVP::BlockMultivector::BlockMatrix B_mat,
-             typename EVP::Scalar* eigvals, typename EVP::BlockMultivector::BlockMatrix& eigvecs) {
-      typename EVP::Scalar;
-      typename EVP::BlockMultivector;
+// /** @brief Concept for the scoped host mirror returned by Backend::host_block
+//  *
+//  *  Exposes the mirrored block as contiguous row-major storage of
+//  *  blocksize x blocksize entries. The handle is neither copyable nor movable:
+//  *  its lifetime is the transfer window.
+//  */
+// template <class H, class T>
+// concept HostBlockHandle = requires(H& h, const H& ch, std::size_t i) {
+//   { h.data() } -> std::same_as<T*>;
+//   { ch.data() } -> std::same_as<const T*>;
+//   { h[i] } -> std::same_as<T&>;
+//   { ch[i] } -> std::same_as<const T&>;
+//   { ch.size() } -> std::same_as<std::size_t>;
+// };
 
-      { EVP::blocksize } -> std::convertible_to<unsigned int>;
-      { EVP::BlockMultivector::blocksize } -> std::convertible_to<unsigned int>;
+template <class B>
+concept BackendConcept = requires(B& b, std::size_t n, unsigned int cols, unsigned int br, unsigned int bc) {
+  typename B::Scalar;
+  typename B::Multivector;
+  typename B::BlockMatrix;
+  { B::blocksize } -> std::convertible_to<unsigned int>;
 
-      requires BlockMultiVector<typename EVP::BlockMultivector>;
+  { b.make_multivector(n, cols) } -> std::same_as<typename B::Multivector>;
+  { b.make_blockmatrix(br, bc) } -> std::same_as<typename B::BlockMatrix>;
 
-      { evp.apply(x, x) } -> std::same_as<void>;
+  { b.sync() } -> std::same_as<void>;
 
-      { evp.dot(x, x, B) } -> std::same_as<void>;
+  // Scoped host mirror of a small block. Reads on construction and/or writes
+  // back on destruction according to the Access mode, so the device-side value
+  // is only guaranteed current once the handle has gone out of scope.
+  // typename B::template HostBlock<std::size_t>;
+  { b.host_block(std::declval<typename B::BlockMatrix::BlockView>(), Access::ReadWrite) }; // -> std::same_as<typename B::HostBlock>;
+  // requires HostBlockHandle<typename B::HostBlock, typename B::Scalar>;
 
-      { evp.orthonormalize(x, B) } -> std::same_as<void>;
+  // The same mirror over a multivector block
+  { b.host_block(std::declval<typename B::Multivector::BlockView>(), Access::ReadWrite) }; // -> std::same_as<typename B::HostBlock>;
 
-      { evp.size() } -> std::same_as<std::size_t>;
+  requires MultivectorConcept<typename B::Multivector>;
+  requires BlockMatrixConcept<typename B::BlockMatrix>;
+};
 
-      { evp.create_multivector(std::size_t{}, std::size_t{}) } -> std::same_as<typename EVP::BlockMultivector>;
-
-      { evp.create_blockmatrix(std::size_t{}, std::size_t{}) } -> std::same_as<typename EVP::BlockMultivector::BlockMatrix>;
-
-      { evp.solve_small_dense(B_mat, B, std::size_t{}) } -> std::same_as<std::size_t>;
-
-      { evp.get_current_eigenvalues() };
-      { evp.get_current_eigenvectors() } -> std::same_as<const typename EVP::BlockMultivector::BlockMatrix&>;
-      { evp.get_eigenvalues_block(std::size_t{}) } -> std::convertible_to<std::span<typename EVP::Scalar>>;
-    } &&
-    (
-        EVP::blocksize == EVP::BlockMultivector::blocksize);
+template <class O, class B>
+concept OperatorConcept = BackendConcept<B> && requires(O& op, typename B::Multivector::BlockView x, typename B::BlockMatrix::BlockView R) {
+  { op.apply(x, x) } -> std::same_as<void>;
+  { op.dot(x, x, R) } -> std::same_as<void>;
+  { op.size() } -> std::same_as<std::size_t>;
+};
 
 } // namespace trl

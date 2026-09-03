@@ -2,19 +2,19 @@
 
 #include <cassert>
 #include <cstddef>
-#include <iostream>
 #include <iomanip>
+#include <iostream>
 
 #include <sycl/sycl.hpp>
 
 #include "matrixblockview.hh"
 
-namespace trl::sycl {
+namespace trl::Sycl {
 /** @brief SYCL block matrix backed by USM shared memory.
  *
  *  Backend specifics:
  *  - Allocates USM shared memory on construction.
- *  - Stores a ::sycl::queue by value and uses it for memcpy/memset.
+ *  - Stores a sycl::queue by value and uses it for memcpy/memset.
  *  - Copy operations perform explicit device copies and wait for completion.
  *  - print() waits on the queue before reading data on the host.
  */
@@ -23,39 +23,38 @@ class BlockMatrix {
 public:
   using BlockView = MatrixBlockView<T, bs>;
 
-  BlockMatrix(::sycl::queue queue, std::size_t block_rows, std::size_t block_cols)
+  BlockMatrix(sycl::queue queue, std::size_t block_rows, std::size_t block_cols)
       : queue(queue)
       , block_rows_(block_rows)
       , block_cols_(block_cols)
   {
-    data_ = ::sycl::malloc_shared<T>(block_rows * block_cols * bs * bs, queue);
+    data_ = sycl::malloc_device<T>(block_rows * block_cols * bs * bs, queue);
     // Zero-initialize the matrix
     queue.memset(data_, 0, block_rows * block_cols * bs * bs * sizeof(T)).wait();
   }
 
-  ~BlockMatrix() {
-    if (data_) {
-      ::sycl::free(data_, queue);
-    }
+  ~BlockMatrix()
+  {
+    if (data_) sycl::free(data_, queue);
   }
 
-  BlockMatrix(const BlockMatrix& other)
-      : queue(other.queue)
-      , block_rows_(other.block_rows_)
-      , block_cols_(other.block_cols_)
-  {
-    data_ = ::sycl::malloc_shared<T>(block_rows_ * block_cols_ * bs * bs, queue);
-    queue.memcpy(data_, other.data_, block_rows_ * block_cols_ * bs * bs * sizeof(T)).wait();
-  }
+  BlockMatrix(const BlockMatrix& other) = delete;
+  //     : queue(other.queue)
+  //     , block_rows_(other.block_rows_)
+  //     , block_cols_(other.block_cols_)
+  // {
+  //   data_ = sycl::malloc_device<T>(block_rows_ * block_cols_ * bs * bs, queue);
+  //   queue.memcpy(data_, other.data_, block_rows_ * block_cols_ * bs * bs * sizeof(T)).wait();
+  // }
 
   BlockMatrix& operator=(const BlockMatrix& other)
   {
     if (this != &other) {
-      ::sycl::free(data_, queue);
+      sycl::free(data_, queue);
       queue = other.queue;
       block_rows_ = other.block_rows_;
       block_cols_ = other.block_cols_;
-      data_ = ::sycl::malloc_shared<T>(block_rows_ * block_cols_ * bs * bs, queue);
+      data_ = sycl::malloc_device<T>(block_rows_ * block_cols_ * bs * bs, queue);
       queue.memcpy(data_, other.data_, block_rows_ * block_cols_ * bs * bs * sizeof(T)).wait();
     }
     return *this;
@@ -75,7 +74,7 @@ public:
   BlockMatrix& operator=(BlockMatrix&& other) noexcept
   {
     if (this != &other) {
-      ::sycl::free(data_, queue);
+      sycl::free(data_, queue);
       queue = std::move(other.queue);
       block_rows_ = other.block_rows_;
       block_cols_ = other.block_cols_;
@@ -95,7 +94,7 @@ public:
     assert(block_row < block_rows_);
     assert(block_col < block_cols_);
     const auto block_index = block_row * block_cols_ + block_col;
-    return BlockView(const_cast<::sycl::queue*>(&queue), data_ + block_index * bs * bs);
+    return BlockView(const_cast<sycl::queue*>(&queue), data_ + block_index * bs * bs);
   }
 
   // Allow BlockMultivector to access data for optimized multiplication
@@ -109,7 +108,7 @@ public:
   void print(bool with_separator = true, bool scientific = true, int precision = 8, T tolerance = 1e-10) const
   {
     queue.wait();
-    
+
     if (with_separator) {
       std::cout << "--------------------------------------------------\n";
       std::cout << "Block matrix of order " << block_rows_ << "x" << block_cols_ << "\n";
@@ -166,7 +165,7 @@ public:
   }
 
 private:
-  mutable ::sycl::queue queue;
+  mutable sycl::queue queue;
 
   std::size_t block_rows_;
   std::size_t block_cols_;
@@ -174,4 +173,4 @@ private:
   T* data_;
 };
 
-} // namespace trl::sycl
+} // namespace trl::Sycl

@@ -1,5 +1,7 @@
 #pragma once
 
+#include <vector>
+
 namespace trl {
 
 struct EigensolverParams {
@@ -9,10 +11,12 @@ struct EigensolverParams {
   double tolerance = 1e-8;
 };
 
+template <class Scalar>
 struct EigensolverResult {
   bool converged;
   unsigned int iterations;
   unsigned int n_op_apply;
+  std::vector<Scalar> eigenvalues;
 };
 
 } // namespace trl
