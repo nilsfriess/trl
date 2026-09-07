@@ -194,12 +194,9 @@ DevicePeaks measure_peaks(sycl::queue& q, std::size_t stream_bytes_per_array = s
               acc[k][l] = 0;
             }
 
-          // Written as a*b+c rather than sycl::fma so the compiler can
-          // contract it; an explicit sycl::fma degrades to a libc call when
-          // the (CPU) target does not have FMA enabled.
           for (std::size_t i = 0; i < iters; ++i)
             for (int k = 0; k < kAcc; ++k)
-              for (int l = 0; l < kVec; ++l) acc[k][l] += x[l] * y[k][l];
+              for (int l = 0; l < kVec; ++l) acc[k][l] = sycl::fma(x[l], y[k][l], acc[k][l]);
 
           T sum = 0;
           for (int k = 0; k < kAcc; ++k)
