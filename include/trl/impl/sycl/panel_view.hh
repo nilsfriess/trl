@@ -14,7 +14,7 @@ template <class T, unsigned int bs>
 class PanelView {
 public:
   static constexpr std::size_t dot_local_size = 128;
-  static constexpr std::size_t dot_num_groups = 64;
+  static constexpr std::size_t dot_num_groups = 128;
 
   PanelView(sycl::queue* q_, T* start, std::size_t rows, unsigned int count, T* scratch)
       : q(q_)
@@ -51,7 +51,7 @@ public:
     const T* a = data();
     const T* b = Y.data();
     T* c = out.data();
-    T* s = scratch_;
+    // T* s = scratch_;
     const auto n = rows();
 
     sycl::event memset_event = q->memset(c, 0, sizeof(T) * bs * bs);
@@ -59,13 +59,15 @@ public:
 
     sycl::event reduce_event = q->submit([&](sycl::handler& cgh) {
       cgh.parallel_for(sycl::nd_range<1>(global_size, local_size), [=](sycl::nd_item<1> it) {
-        auto gid = it.get_global_id();
-
+        const std::size_t gid = it.get_global_linear_id();
+        const std::size_t gsize = it.get_global_range().size();
+        const std::size_t chunk = (n + gsize - 1) / gsize;
+        const std::size_t begin = sycl::min(gid * chunk, n);
+        const std::size_t end = sycl::min(begin + chunk, n);
         T sum[bs * bs] = {0};
-        for (auto i = gid; i < n; i += it.get_global_range()) {
+        for (auto i = begin; i < end; ++i)
           for (unsigned int I = 0; I < bs; ++I)
             for (unsigned int J = 0; J < bs; ++J) sum[I * bs + J] += a[i * bs + I] * b[i * bs + J];
-        }
 
         T reduced_sums[bs * bs];
         // Note: Do not nest this loop. A compiler bug in AdaptiveCpp miscompiles this (see https://github.com/AdaptiveCpp/AdaptiveCpp/issues/2224)
@@ -76,7 +78,6 @@ public:
 
         // Write to scratch memory
         if (it.get_group().leader()) {
-          auto group_id = it.get_group().get_group_id();
           for (unsigned int I = 0; I < bs; ++I)
             for (unsigned int J = 0; J < bs; ++J) {
               sycl::atomic_ref<double, sycl::memory_order::relaxed, sycl::memory_scope::device> c_ref(c[I * bs + J]);

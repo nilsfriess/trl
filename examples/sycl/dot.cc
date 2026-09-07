@@ -3,6 +3,7 @@
 #include "trl/sycl/backend.hh"
 
 #include "benchmark.hh"
+#include "roofline.hh"
 
 #include <Eigen/Core>
 #include <cstddef>
@@ -44,10 +45,10 @@ int main()
 
   using Scalar = double;
   constexpr unsigned int blocksize = 4;
-  const std::size_t n = 1 << 16;
+  const std::size_t n = 3 * 1 << 22;
 
-  constexpr int warmups = 50;
-  constexpr int repeats = 1000;
+  constexpr int warmups = 10;
+  constexpr int repeats = 20;
 
   BlockMultivector<Scalar, blocksize> V(q, n, 2 * blocksize);
 
@@ -138,4 +139,30 @@ int main()
   std::cout << "\nMin-based comparison:\n";
   std::cout << "  Eigen / SYCL (wall time):        " << (sycl_wall_min > 0 ? eigen_min / sycl_wall_min : 0.0) << "x\n";
   std::cout << "  Eigen / SYCL (kernel time only): " << (sycl_kernel_min > 0 ? eigen_min / sycl_kernel_min : 0.0) << "x\n";
+
+  // ---------------------------------------------------------------------
+  // Compute percentage of roofline max
+  // ---------------------------------------------------------------------
+  auto flops = 2 * n * blocksize * blocksize;
+  auto bytes = 2 * sizeof(Scalar) * n * blocksize;
+  auto ai = flops / (1. * bytes);
+  std::cout << "Arithmetic intensity: " << ai << "\n";
+
+  // Measure achievable peaks on this device/queue instead of hardcoding them.
+  const auto peaks = trl::benchmark::measure_peaks<Scalar>(q);
+  std::cout << "Measured peaks:\n";
+  std::cout << "  STREAM triad: " << peaks.triad_gbps << " GB/s\n";
+  std::cout << "  Read stream:  " << peaks.read_gbps << " GB/s\n";
+  std::cout << "  FMA:          " << peaks.fma_gflops << " GFLOP/s\n";
+
+  // dot is read-only, so the read stream is the honest bandwidth yardstick.
+  const auto peak_bw = peaks.read_gbps * 1e9;    // Bytes/s
+  const auto peak_flops = peaks.fma_gflops * 1e9; // FLOP/s
+
+  auto roofline = std::min(peak_flops, peak_bw * ai);
+  auto kernel = flops / (sycl_kernel_min * 1e-3);
+
+  std::cout << "  Roofline: " << roofline << "\n";
+  std::cout << "  Kernel:   " << kernel << "\n";
+  std::cout << "  K / R:    " << kernel / roofline << "\n";
 }
