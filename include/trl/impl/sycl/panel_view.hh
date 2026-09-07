@@ -31,16 +31,63 @@ public:
 
   void copy_from(PanelView other) { TRL_TODO("PanelView::copy_from"); }
 
-  void mult(TransposeMode t, const DenseMatrix<T>& M, PanelView out) { TRL_TODO("PanelView::gemm"); }
+  /** @brief Computes out = this * M (or this * M^T for TransposeMode::Transpose).
+   *
+   *  @p M is (cols() x out.cols()) row-major for NoTranspose. If @p events is
+   *  given, the events of all submitted kernels are appended to it, as in dot.
+   */
+  void mult(TransposeMode t, const DenseMatrix<T>& M, PanelView out, std::vector<sycl::event>* events = nullptr)
+  {
+    TRL_CHECK(t == TransposeMode::NoTranspose, "Only TransposeMode::NoTranspose implementd");
+    TRL_CHECK(rows() == out.rows(), "Input panel and output panel must have the same number of rows");
+    TRL_CHECK(cols() == M.rows(), "Number of columns of input panel must match number of rows of matrix");
+    TRL_CHECK(M.cols() == out.cols(), "Number of columns of output panel must match number of cols of matrix");
+
+    const T* a = data();
+    const T* b = M.data();
+    T* c = out.data();
+    const auto in_blocks = count_;
+    const auto out_blocks = out.count_;
+    const auto n = rows();
+    const auto ldb = M.cols(); // M is row-major, so its row stride is its column count
+
+    sycl::event mult_event = q->submit([&](sycl::handler& cgh) {
+      sycl::local_accessor<T, 1> V_local(sycl::range<1>(cols()), cgh);
+      cgh.parallel_for(sycl::range<1>(n), [=](sycl::id<1> id) {
+        auto tid = id[0];
+
+        for (unsigned int Bi=0; Bi<in_blocks; ++Bi)
+          for (unsigned int i=0; i<bs; ++i)
+            V_local[Bi*bs + i] = a[Bi * n * bs + tid * bs + i];
+        // Output block Bo takes a contribution from *every* input block Bi:
+        // out(:, Bo*bs + i) = sum over Bi, j of this(:, Bi*bs + j) * M(Bi*bs + j, Bo*bs + i).
+        // The bs accumulators of one output block stay in registers across the
+        // whole Bi loop, so out is written exactly once per row and block.
+        for (unsigned int Bo = 0; Bo < out_blocks; ++Bo) {
+          T c_private[bs];
+          for (unsigned int i = 0; i < bs; ++i) c_private[i] = T{0};
+
+          for (unsigned int Bi = 0; Bi < in_blocks; ++Bi) {
+            const T* a_base = a + Bi * n * bs;
+
+            T a_private[bs];
+            for (unsigned int j = 0; j < bs; ++j) a_private[j] = V_local[Bi * bs + j];
+
+            for (unsigned int i = 0; i < bs; ++i)
+              for (unsigned int j = 0; j < bs; ++j) c_private[i] += a_private[j] * b[(Bi * bs + j) * ldb + (Bo * bs + i)];
+          }
+
+          T* c_base = c + Bo * n * bs;
+          for (unsigned int i = 0; i < bs; ++i) c_base[tid * bs + i] = c_private[i];
+        }
+      });
+    });
+    if (events) events->push_back(mult_event);
+  }
 
   void subtract(PanelView other) { TRL_TODO("PanelView::subtract"); }
 
   /** @brief Computes out = this^T * Y.
-   *
-   *  Submits a two-kernel dot product (block reduction into scratch, followed
-   *  by a final summation) to the in-order queue. If @p events is given, the
-   *  events of all submitted kernels are appended to it, so callers can use
-   *  event profiling to time the kernels individually.
    */
   void dot(PanelView Y, DenseMatrix<T>& out, std::vector<sycl::event>* events = nullptr)
   {
@@ -48,7 +95,7 @@ public:
 
     const auto local_size = launch_.local_size;
     const auto global_size = launch_.global_size();
-    const bool interleaved = launch_.interleaved;
+    const bool interleaved = sycl::specialized(launch_.interleaved);
 
     const T* a = data();
     const T* b = Y.data();
@@ -76,7 +123,8 @@ public:
           for (std::size_t i = gid; i < n; i += gsize)
             for (unsigned int I = 0; I < bs; ++I)
               for (unsigned int J = 0; J < bs; ++J) sum[I * bs + J] += a[i * bs + I] * b[i * bs + J];
-        } else {
+        }
+        else {
           // CPU: one contiguous, prefetchable chunk of rows per work-item.
           const std::size_t chunk = (n + gsize - 1) / gsize;
           const std::size_t begin = sycl::min(gid * chunk, n);

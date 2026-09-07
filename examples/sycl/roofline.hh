@@ -12,6 +12,9 @@
  *                    stream. Bytes are counted with the STREAM convention
  *                    (3 words per element; the write-allocate/RFO traffic a
  *                    CPU actually moves on the bus is not counted).
+ *  - Copy stream:    c[i] = a[i], one read + one write. The yardstick for
+ *                    kernels that stream one array in and one out, such as
+ *                    the panel product W = V * M.
  *  - Read stream:    sum += a[i], a pure-read reduction. This is the honest
  *                    yardstick for read-only kernels such as the tall-skinny
  *                    dot (V^T W), whose access mix contains no writes.
@@ -65,6 +68,7 @@ namespace trl::benchmark {
 /** @brief Achievable device peaks measured by measure_peaks(). */
 struct DevicePeaks {
   double triad_gbps = 0.0; ///< STREAM triad bandwidth (3 words/element convention)
+  double copy_gbps = 0.0;  ///< Copy bandwidth (1 read + 1 write per element)
   double read_gbps = 0.0;  ///< Pure-read stream bandwidth
   double fma_gflops = 0.0; ///< Achievable FMA throughput (mul+add = 2 flops)
 };
@@ -142,7 +146,8 @@ inline void for_each_index(const sycl::nd_item<1>& it, std::size_t n, bool inter
 
   if (interleaved) {
     for (std::size_t i = gid; i < n; i += gsize) f(i);
-  } else {
+  }
+  else {
     const std::size_t chunk = (n + gsize - 1) / gsize;
     const std::size_t begin = min_size(gid * chunk, n);
     const std::size_t end = min_size(begin + chunk, n);
@@ -190,8 +195,7 @@ DevicePeaks measure_peaks(sycl::queue& q, std::size_t stream_bytes_per_array = 0
   q.wait();
 
   DevicePeaks peaks;
-  std::cerr << "[peaks] alloc+init done (3 x " << (stream_bytes_per_array / (1 << 20)) << " MiB, "
-            << range.get_global_range().size() / range.get_local_range().size() << " groups x "
+  std::cerr << "[peaks] alloc+init done (3 x " << (stream_bytes_per_array / (1 << 20)) << " MiB, " << range.get_global_range().size() / range.get_local_range().size() << " groups x "
             << range.get_local_range().size() << ", " << (interleaved ? "interleaved" : "chunked") << ")\n"
             << std::flush;
 
@@ -201,16 +205,30 @@ DevicePeaks measure_peaks(sycl::queue& q, std::size_t stream_bytes_per_array = 0
   {
     const T alpha = static_cast<T>(1.0000000001);
     auto submit = [&] {
-      return q.submit([&](sycl::handler& cgh) {
-        cgh.parallel_for(range, [=](sycl::nd_item<1> it) {
-          detail::for_each_index(it, n, interleaved, [=](std::size_t i) { c[i] = a[i] + alpha * b[i]; });
-        });
-      });
+      return q.submit(
+          [&](sycl::handler& cgh) { cgh.parallel_for(range, [=](sycl::nd_item<1> it) { detail::for_each_index(it, n, interleaved, [=](std::size_t i) { c[i] = a[i] + alpha * b[i]; }); }); });
     };
     const double ms = detail::min_kernel_ms(2, 5, submit);
     const double bytes = 3.0 * static_cast<double>(n) * sizeof(T); // STREAM convention
     peaks.triad_gbps = bytes / (ms * 1e-3) / 1e9;
     std::cerr << "[peaks] triad done: " << peaks.triad_gbps << " GB/s\n" << std::flush;
+  }
+
+  // -------------------------------------------------------------------
+  // Copy stream: c[i] = a[i]   (1 read + 1 write, as in W = V * M)
+  // -------------------------------------------------------------------
+  {
+    auto submit = [&] {
+      return q.submit([&](sycl::handler& cgh) {
+        cgh.parallel_for(range, [=](sycl::nd_item<1> it) {
+          detail::for_each_index(it, n, interleaved, [=](std::size_t i) { c[i] = a[i]; });
+        });
+      });
+    };
+    const double ms = detail::min_kernel_ms(2, 5, submit);
+    const double bytes = 2.0 * static_cast<double>(n) * sizeof(T);
+    peaks.copy_gbps = bytes / (ms * 1e-3) / 1e9;
+    std::cerr << "[peaks] copy done: " << peaks.copy_gbps << " GB/s\n" << std::flush;
   }
 
   // -------------------------------------------------------------------
@@ -287,7 +305,8 @@ DevicePeaks measure_peaks(sycl::queue& q, std::size_t stream_bytes_per_array = 0
       // Clamp so a bad pilot cannot blow the run up.
       iters = static_cast<std::size_t>(std::min(target, 1e7));
       iters = std::max<std::size_t>(iters, pilot_iters);
-    } else {
+    }
+    else {
       iters = 1 << 16; // pilot unmeasurable; fixed fallback
     }
     std::cerr << "[peaks] fma calibrated iters = " << iters << "\n" << std::flush;
