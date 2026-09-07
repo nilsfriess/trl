@@ -8,6 +8,8 @@
 
 #include "blockmatrix.hh"
 #include "blockview.hh"
+#include "dense_matrix.hh"
+#include "panel_view.hh"
 
 namespace trl::Sycl {
 /** @brief SYCL multivector backed by USM shared memory.
@@ -25,8 +27,8 @@ public:
   using Scalar = T;
   constexpr static unsigned int blocksize = bs;
 
-  using BlockView = BlockView<T, bs>;
-
+  using BlockView = PanelView<T, bs>;
+  using PanelView = PanelView<T, bs>;
   using BlockMatrix = BlockMatrix<T, bs>;
 
   BlockMultivector(sycl::queue queue, std::size_t rows, std::size_t cols)
@@ -38,6 +40,7 @@ public:
 
     data = sycl::malloc_device<T>(rows * cols, queue);
     queue.memset(data, 0, rows * cols * sizeof(T)).wait();
+    scratch = sycl::malloc_device<T>(BlockView::dot_num_groups * bs * bs, queue);
   }
 
   BlockMultivector(const BlockMultivector& other)
@@ -47,6 +50,7 @@ public:
   {
     data = sycl::malloc_device<T>(rows * blocks_ * bs, queue);
     queue.memset(data, 0, rows * blocks_ * bs * sizeof(T)).wait();
+    scratch = sycl::malloc_device<T>(BlockView::dot_num_groups, queue);
   }
 
   BlockMultivector& operator=(const BlockMultivector& other)
@@ -54,11 +58,13 @@ public:
     assert(false && "not implemented");
     if (this != &other) {
       sycl::free(data, queue);
+      // sycl::free(scratch, queue);
       queue = other.queue;
       rows = other.rows;
       blocks_ = other.blocks_;
       data = sycl::malloc_device<T>(rows * blocks_ * bs, queue);
       queue.memset(data, 0, rows * blocks_ * bs * sizeof(T)).wait();
+      scratch = sycl::malloc_device<T>(BlockView::dot_num_groups, queue);
     }
     return *this;
   }
@@ -68,19 +74,24 @@ public:
       , rows(other.rows)
       , blocks_(other.blocks_)
       , data(other.data)
+      , scratch(other.scratch)
   {
     other.data = nullptr;
+    other.scratch = nullptr;
   }
 
   BlockMultivector& operator=(BlockMultivector&& other)
   {
     if (this != &other) {
       if (data) sycl::free(data, queue);
+      if (scratch) sycl::free(scratch, queue);
       queue = other.queue;
       rows = other.rows;
       blocks_ = other.blocks_;
       data = other.data;
+      scratch = other.scratch;
       other.data = nullptr;
+      other.scratch = nullptr;
     }
     return *this;
   }
@@ -88,56 +99,39 @@ public:
   ~BlockMultivector()
   {
     if (data) sycl::free(data, queue);
+    if (scratch) sycl::free(scratch, queue);
   }
 
-  BlockView block_view(std::size_t block)
-  {
-    assert(block < blocks_);
+  PanelView block_view(std::size_t block) { return panel_view(block, 1); }
 
-    return BlockView(&queue, data + block * rows * bs, rows);
-  }
+  // PanelView block_view(std::size_t block) const
+  // {
+  //   assert(block < blocks_);
 
-  BlockView block_view(std::size_t block) const
-  {
-    assert(block < blocks_);
-
-    return BlockView(const_cast<sycl::queue*>(&queue), data + block * rows * bs, rows);
-  }
+  //   return {const_cast<sycl::queue*>(&queue), data + block * rows * bs, rows, 1};
+  // }
 
   std::size_t blocks() const { return blocks_; }
 
-  BlockMultivector& operator-=(const BlockMultivector& other)
+  PanelView panel_view(unsigned int first, unsigned int count)
   {
-    assert(rows == other.rows);
-    assert(blocks_ == other.blocks_);
-    assert(false && "not implemented");
-
-    for (std::size_t i = 0; i < blocks_; ++i) {
-      auto this_block = block_view(i);
-      auto other_block = const_cast<BlockMultivector&>(other).block_view(i);
-      this_block -= other_block;
-    }
-    return *this;
-  }
-
-  void mult(const BlockMatrix& matrix, BlockMultivector& result)
-  {
-    assert(false && "not implemented");
-    mult(matrix, result, blocks_ - 1);
-  }
-
-  void mult(const BlockMatrix& matrix, BlockMultivector& result, std::size_t to_block)
-  {
-    // Verify dimension constraints
-    assert(false && "not implemented");
+    assert(first < blocks_);
+    assert(first + count < blocks_ + 1);
+    assert(count >= 1);
+    return {&queue, data + first * rows * bs, rows, count, scratch};
   }
 
 private:
-  sycl::queue queue;
+  mutable sycl::queue queue;
 
   std::size_t rows;
   std::size_t blocks_;
 
   T* data;
+
+  // Scratch for the two-phase dot kernel (one slot per work-group), shared by
+  // all block views. View operations are serialized by the in-order queue, so
+  // no two kernels can race on it.
+  T* scratch = nullptr;
 };
 } // namespace trl::Sycl

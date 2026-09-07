@@ -29,7 +29,7 @@ public:
   static constexpr unsigned int cols = bs;
 
   MatrixBlockView(sycl::queue* queue, T* data)
-      : data(data)
+      : data_(data)
       , queue(queue)
   {
   }
@@ -45,12 +45,12 @@ public:
   // Default destructor (view doesn't own data)
   ~MatrixBlockView() = default;
 
-  void copy_from(const MatrixBlockView& source) { queue->memcpy(data, source.data, bs * bs * sizeof(T)); }
+  void copy_from(const MatrixBlockView& source) { queue->memcpy(data_, source.data_, bs * bs * sizeof(T)); }
 
   void copy_from_transpose(const MatrixBlockView& source)
   {
-    T* dest_ptr = data;
-    const T* src_ptr = source.data;
+    T* dest_ptr = data_;
+    const T* src_ptr = source.data_;
 
     // Transpose into a private buffer before storing, so that the block may
     // alias its own source.
@@ -63,7 +63,7 @@ public:
     });
   }
 
-  void set_zero() { queue->memset(data, 0, bs * bs * sizeof(T)); }
+  void set_zero() { queue->memset(data_, 0, bs * bs * sizeof(T)); }
 
   void set_diagonal(std::span<T> values)
   {
@@ -75,7 +75,7 @@ public:
     std::array<T, bs> diag{};
     std::copy_n(values.begin(), bs, diag.begin());
 
-    T* dest_ptr = data;
+    T* dest_ptr = data_;
     queue->single_task([=] {
       for (std::size_t i = 0; i < bs; ++i) dest_ptr[i * bs + i] = diag[i];
     });
@@ -83,9 +83,9 @@ public:
 
   void mult(MatrixBlockView B, MatrixBlockView C)
   {
-    const T* a_ptr = data;
-    const T* b_ptr = B.data;
-    T* c_ptr = C.data;
+    const T* a_ptr = data_;
+    const T* b_ptr = B.data_;
+    T* c_ptr = C.data_;
 
     // C = this * B (matrix-matrix multiplication). Accumulate into a private
     // buffer before storing, so that C may alias either input.
@@ -103,9 +103,10 @@ public:
     });
   }
 
-  T* data;
+  T* data() { return data_; }
 
 private:
+  T* data_;
   sycl::queue* queue;
 };
 

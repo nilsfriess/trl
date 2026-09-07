@@ -2,9 +2,8 @@
 
 #include <cassert>
 #include <cstddef>
-#include <tuple>
-#include <utility>
-
+#include <hipSYCL/sycl/libkernel/group_functions.hpp>
+#include <hipSYCL/sycl/usm.hpp>
 #include <sycl/sycl.hpp>
 
 #include "../../helpers.hh"
@@ -28,10 +27,18 @@ public:
   using EntryType = T;
   using MatrixBlockView = MatrixBlockView<T, cols_>;
 
-  BlockView(sycl::queue* queue, T* data, std::size_t rows)
+  // Tuning constants for the two-phase dot kernel. The scratch buffer handed
+  // to the view must hold at least dot_num_groups entries.
+  static constexpr std::size_t dot_local_size = 32;
+  static constexpr std::size_t dot_num_groups = 16;
+
+  /** @param scratch Non-owning pointer to scratch memory with at least
+   *  dot_num_groups entries (used by dot); owned by the BlockMultivector. */
+  BlockView(sycl::queue* queue, T* data, std::size_t rows, T* scratch = nullptr)
       : data(data)
       , q(queue)
       , rows_(rows)
+      , scratch(scratch)
   {
   }
 
@@ -45,7 +52,7 @@ public:
 
   BlockView& operator=(BlockView&&) = default;
 
-  // Default destructor (view doesn't own data)
+  // Default destructor (view doesn't own data or scratch)
   ~BlockView() = default;
 
   std::size_t rows() const { return rows_; }
@@ -61,17 +68,36 @@ public:
   {
     const auto n = rows();
 
+    constexpr auto local_size = dot_local_size;
+    constexpr auto num_groups = dot_num_groups;
+    constexpr auto global_size = num_groups * local_size;
+
     if constexpr (cols_ == 1) {
+      assert(scratch != nullptr);
       auto* a = data;
       auto* b = B.data;
-      auto* c = C.data;
+      auto* c = C.data_;
+      auto* s = scratch;
 
-      q->submit([&](sycl::handler& h) {
-        auto red = sycl::reduction(c, sycl::plus<>(), {sycl::property::reduction::initialize_to_identity{}});
-        h.parallel_for(sycl::range<1>(n), red, [a, b](sycl::id<1> i, auto& tmp) {
-          double prod = a[i] * b[i];
-          tmp += prod;
+      // q->fill(c, T(0), 1);
+
+      q->submit([&](auto& h) {
+        // sycl::local_accessor<T, 1> local_dot(local_size, h);
+        h.parallel_for(sycl::nd_range<1>(global_size, local_size), [=](sycl::nd_item<1> it) {
+          auto gid = it.get_global_id();
+
+          T sum = 0;
+          for (auto i = gid; i < n; i += it.get_global_range()) sum += a[i] * b[i];
+
+          auto red = sycl::reduce_over_group(it.get_group(), sum, sycl::plus<T>());
+          if (it.get_group().leader()) s[it.get_group().get_group_id()] = red;
         });
+      });
+
+      // Ordered after the parallel_for by the in-order queue.
+      q->single_task([=]() {
+        c[0] = 0;
+        for (std::size_t i = 0; i < num_groups; ++i) c[0] += s[i];
       });
     }
     else {
@@ -85,7 +111,7 @@ public:
 
     q->submit([&](auto& cgh) {
       auto* a = data;
-      auto* b = B.data;
+      auto* b = B.data_;
       auto* c = C.data;
 
       cgh.parallel_for(sycl::range{n}, [=](sycl::id<1> id) {
@@ -112,7 +138,7 @@ public:
 
     q->submit([&](auto& cgh) {
       auto* a = data;
-      auto* b = B.data;
+      auto* b = B.data_;
       auto* c = C.data;
 
       cgh.parallel_for(sycl::range{n}, [=](sycl::id<1> id) {
@@ -139,7 +165,7 @@ public:
 
     q->submit([&](auto& cgh) {
       auto* a = data;
-      auto* b = B.data;
+      auto* b = B.data_;
       auto* c = C.data;
 
       cgh.parallel_for(sycl::range{n}, [=](sycl::id<1> id) {
@@ -185,7 +211,7 @@ public:
     q->submit([&](sycl::handler& cgh) {
       auto* a = data; // this
       auto* b = B.data;
-      auto* c = C.data;
+      auto* c = C.data_;
 
       cgh.parallel_for(sycl::range<1>{K}, [=](sycl::id<1> id) {
         const std::size_t k = id[0];
@@ -209,6 +235,8 @@ public:
 
 private:
   sycl::queue* q;
-  const std::size_t rows_;
+  std::size_t rows_;
+
+  T* scratch; // non-owning, owned by BlockMultivector
 };
 } // namespace trl::Sycl

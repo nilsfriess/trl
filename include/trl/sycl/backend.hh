@@ -2,6 +2,7 @@
 
 #include "trl/concepts.hh"
 #include "trl/impl/sycl/blockmatrix.hh"
+#include "trl/impl/sycl/dense_matrix.hh"
 #include "trl/impl/sycl/multivector.hh"
 
 #include <algorithm>
@@ -20,6 +21,7 @@ struct Backend {
   using Scalar = T;
   using Multivector = BlockMultivector<T, bs>;
   using BlockMatrix = BlockMatrix<T, bs>;
+  using DenseMatrix = DenseMatrix<T>;
   static constexpr unsigned int blocksize = bs;
 
   /** @brief Staged host mirror of a small bs x bs block.
@@ -102,9 +104,16 @@ struct Backend {
 
   Multivector make_multivector(std::size_t n, unsigned int cols) const { return {queue, n, cols}; }
   BlockMatrix make_blockmatrix(unsigned int br, unsigned int bc) const { return {queue, br, bc}; }
+  DenseMatrix make_dense_matrix(unsigned int rows, unsigned int cols) const { return {queue, rows, cols}; }
   void sync() { queue.wait(); }
 
-  HostBlock<std::dynamic_extent> host_block(BlockMatrix &M, Access access)
+  HostBlock<std::dynamic_extent> host_block(DenseMatrix& M, Access access)
+  {
+    const auto n_total = M.rows() * M.cols();
+    return {queue, access, M.data(), n_total};
+  }
+
+  HostBlock<std::dynamic_extent> host_block(BlockMatrix& M, Access access)
   {
     const auto n_total = M.block_rows() * M.block_cols() * blocksize * blocksize;
     return {queue, access, M.data(), n_total};
@@ -114,7 +123,7 @@ struct Backend {
   {
     // Here we know the size at compile time, so we can use the HostBlock
     // variant that does not allocate memory at runtime
-    return {queue, access, B.data, bs * bs};
+    return {queue, access, B.data(), bs * bs};
   }
 
   HostBlock<std::dynamic_extent> host_block(Multivector::BlockView V, Access access)
@@ -123,7 +132,7 @@ struct Backend {
     // dynamic_extent variant that does allocate memory at runtime.
     // This accessor is supposed to be only use for initialisation
     // anyway, so that should be fine.
-    return {queue, access, V.data, V.rows() * V.cols()};
+    return {queue, access, V.data(), V.rows() * V.cols()};
   }
 
 private:

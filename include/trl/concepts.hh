@@ -13,6 +13,11 @@ enum class Access {
   ReadWrite,
 };
 
+enum class TransposeMode {
+  Transpose,
+  NoTranspose,
+};
+
 /** @brief Concept for matrix block views
  *
  *  A MatrixBlockView represents a view into a small dense block (typically bs x bs)
@@ -83,20 +88,20 @@ concept BlockMatrixConcept = requires(BM bm, std::size_t i, std::size_t j) {
  *  @par Notes
  *  Operations are expected to be dense, block-sized linear algebra kernels.
  */
-template <class BV>
-concept MultivectorBlockViewConcept = requires(BV bv, const BV& other, const BV::MatrixBlockView& W) {
-  typename BV::EntryType;
+// template <class BV>
+// concept MultivectorBlockViewConcept = requires(BV bv, const BV& other /*, const BV::MatrixBlockView& W*/) {
+//   typename BV::EntryType;
 
-  { bv.set_zero() } -> std::same_as<void>;
-  { bv.rows() } -> std::same_as<std::size_t>;
-  { bv.cols() } -> std::same_as<std::size_t>;
-  { bv.copy_from(other) } -> std::same_as<void>;
-  { bv -= other } -> std::same_as<BV&>;
-  { bv.mult_add(W, other) } -> std::same_as<void>;
-  { bv.mult(W, other) } -> std::same_as<void>;
-  { bv.mult_transpose(W, other) } -> std::same_as<void>;
-  { bv.subtract_product(other, W) } -> std::same_as<void>;
-};
+//   // { bv.set_zero() } -> std::same_as<void>;
+//   // { bv.rows() } -> std::same_as<std::size_t>;
+//   // { bv.cols() } -> std::same_as<std::size_t>;
+//   // { bv.copy_from(other) } -> std::same_as<void>;
+//   // { bv -= other } -> std::same_as<BV&>;
+//   // { bv.mult_add(W, other) } -> std::same_as<void>;
+//   // { bv.mult(W, other) } -> std::same_as<void>;
+//   // { bv.mult_transpose(W, other) } -> std::same_as<void>;
+//   // { bv.subtract_product(other, W) } -> std::same_as<void>;
+// };
 
 /** @brief Concept for block multivectors
  *
@@ -119,7 +124,7 @@ concept MultivectorConcept = requires(BMV bmv, std::size_t i) {
   { bmv.block_view(i) } -> std::same_as<typename BMV::BlockView>;
   { bmv.blocks() } -> std::same_as<std::size_t>;
 
-  requires MultivectorBlockViewConcept<typename BMV::BlockView>;
+  // requires MultivectorBlockViewConcept<typename BMV::BlockView>; //
   requires BlockMatrixConcept<typename BMV::BlockMatrix>;
 };
 
@@ -143,10 +148,12 @@ concept BackendConcept = requires(B& b, std::size_t n, unsigned int cols, unsign
   typename B::Scalar;
   typename B::Multivector;
   typename B::BlockMatrix;
+  typename B::DenseMatrix;
   { B::blocksize } -> std::convertible_to<unsigned int>;
 
   { b.make_multivector(n, cols) } -> std::same_as<typename B::Multivector>;
   { b.make_blockmatrix(br, bc) } -> std::same_as<typename B::BlockMatrix>;
+  { b.make_dense_matrix(br, bc) } -> std::same_as<typename B::DenseMatrix>;
 
   { b.sync() } -> std::same_as<void>;
 
@@ -167,7 +174,7 @@ concept BackendConcept = requires(B& b, std::size_t n, unsigned int cols, unsign
 template <class O, class B>
 concept OperatorConcept = BackendConcept<B> && requires(O& op, typename B::Multivector::BlockView x, typename B::BlockMatrix::BlockView R) {
   { op.apply(x, x) } -> std::same_as<void>;
-  { op.dot(x, x, R) } -> std::same_as<void>;
+  // { op.dot(x, x, R) } -> std::same_as<void>;
   { op.size() } -> std::same_as<std::size_t>;
 };
 

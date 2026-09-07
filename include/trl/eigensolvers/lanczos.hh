@@ -42,6 +42,7 @@ public:
       T(backend_.make_blockmatrix(ncv / blocksize, ncv / blocksize))
       , U(backend_.make_blockmatrix(1, 2))
       , Y(backend_.make_blockmatrix(ncv / blocksize, ncv / blocksize))
+      , YY(backend_.make_dense_matrix(ncv, nev))
       , op(std::move(op_))
       , backend(std::move(backend_))
   {
@@ -99,15 +100,24 @@ public:
       auto k_restart = nev / blocksize;
       assert(k_restart < ncv / blocksize);
 
+      // W(:, 0:k_restart) = V(:, 0:ncv - 1) * Y(0:ncv - 1, 0:k_restart)
+#if 1
+      auto Vp = V.panel_view(0, ncv - 1);
+      auto Wp = V.panel_view(0, k_restart - 1);
+
+      Vp.mult(TransposeMode::NoTranspose, YY, Wp); // W(:, 0:k_restart) = V(:, 0:ncv - 1) * Y(0:ncv - 1, 0:k_restart)
+#else
       for (std::size_t j = 0; j < k_restart; ++j) {
         auto Wj = W.block_view(j);
         Wj.set_zero();
-        for (std::size_t i = 0; i < ncv / blocksize; ++i) {
+        // W(j) = V(0) * Y(0, j) + V(1) * Y(1, j) + ... + V(ncv - 1) * Y(ncv - 1, j)
+        for (std::size_t i = 0; i < ncv / blocksize; ++i) { // W(j) += V(i) * Y(i, j)
           auto Vi = V.block_view(i);
           auto Yij = Y.block_view(i, j);
           Vi.mult_add(Yij, Wj);
         }
       }
+#endif
       // Copy V_{m+1} to V_{k+1}
       W.block_view(k_restart).copy_from(V.block_view(ncv / blocksize));
 
@@ -131,7 +141,7 @@ public:
         auto Tik = T.block_view(i, k_restart);
         auto Xrow = Y.block_view(ncv / blocksize - 1, i); // use last row of Y from current projected problem
 
-        U.block_view(0, 0).mult(Xrow, Tki);
+        beta.mult(Xrow, Tki);
         Tik.copy_from_transpose(Tki);
       }
 
@@ -148,16 +158,18 @@ public:
 
       // Compute the next diagonal block
       auto Tkk = T.block_view(k, k);
-      op->dot(Vk, Vk1, Tkk);
+      auto Tkkd = typename B::DenseMatrix(Tkk.data(), blocksize, blocksize);
+      op->dot(Vk, Vk1, Tkkd);
 
       auto W0 = W.block_view(0);    // temp storage
       auto Z0 = U.block_view(0, 1); // temp storage
-      Vk.mult(Tkk, W0);
-      Vk1 -= W0;
+      Vk.mult(TransposeMode::NoTranspose, Tkkd, W0);
+      Vk1.subtract(W0);
 
       // Vk1 couples to every retained Ritz block here, not just Vk-1, so skip straight
       // to full reorthogonalization instead of a single-neighbor subtraction.
-      reorthogonalize_against(Vk1, k + 1, Z0);
+      auto Z0_dense = typename B::DenseMatrix(Z0.data(), blocksize, blocksize);
+      reorthogonalize_against(Vk1, k + 1, Z0_dense);
 
       // Step 6: Orthonormalize V_{i+1} to get beta_i (Cholesky factor) and V_{i+1}
       orthonormalize(Vk1, beta);
@@ -226,22 +238,25 @@ public:
       n_op_apply++;
 
       // Step 2: v_{i+1} -= v_{i-1} * beta_{i-1}^T
+      auto beta_dense = typename B::DenseMatrix(beta.data(), blocksize, blocksize);
       if (i > 0) {
         auto V_prev = V.block_view(i - 1);
-        V_prev.mult_transpose(beta, W0);
-        V_next -= W0;
+        V_prev.mult(TransposeMode::Transpose, beta_dense, W0);
+        V_next.subtract(W0);
       }
 
       // Step 3: Compute T(i,i) = <v_i, v_{i+1}>
       auto Tii = T.block_view(i, i);
-      op->dot(V_curr, V_next, Tii);
+      auto Tii_dense = typename B::DenseMatrix(Tii.data(), blocksize, blocksize);
+      op->dot(V_curr, V_next, Tii_dense);
 
       // Step 4: Orthogonalise v_{i+1} -= v_i * T(i,i)
-      V_curr.mult(Tii, W0);
-      V_next -= W0;
+      V_curr.mult(TransposeMode::NoTranspose, Tii_dense, W0);
+      V_next.subtract(W0);
 
       // Step 5: Full reorthogonalization
-      reorthogonalize_against(V_next, i + 1, Z0);
+      auto Z0_dense = typename B::DenseMatrix(Z0.data(), blocksize, blocksize);
+      reorthogonalize_against(V_next, i + 1, Z0_dense);
 
       // Step 6: Orthonormalize V_{i+1} to get beta_i (Cholesky factor) and V_{i+1}
       orthonormalize(V_next, beta);
@@ -365,7 +380,8 @@ private:
     // 1. Compute Gram matrix G = V^T * V (stored in R).
     // Use the operator's inner product (which is the B-inner product for
     // generalized problems), not the Euclidean dot of the view.
-    op->dot(V_next, V_next, beta);
+    auto beta_dense = typename B::DenseMatrix(beta.data(), blocksize, blocksize);
+    op->dot(V_next, V_next, beta_dense);
 
     // 2. Compute Cholesky factorization of G = U^T * U
     //
@@ -385,7 +401,7 @@ private:
     } // flush: beta holds U^{-1} on the device
 
     auto Vtemp0 = W.block_view(0);
-    V_next.mult(beta, Vtemp0); // V_temp = V * U^{-1}
+    V_next.mult(TransposeMode::NoTranspose, beta_dense, Vtemp0); // V_temp = V * U^{-1}
     V_next.copy_from(Vtemp0);
 
     // 4. Restore U in R (the Cholesky factor, not its inverse)
@@ -410,10 +426,11 @@ private:
   typename B::BlockMatrix T; // Block tridiagonal matrix
   typename B::BlockMatrix U; // Temp matrix
   typename B::BlockMatrix Y; // Eigenvectors of small problem
+  typename B::DenseMatrix YY;
 
   Reorth reorth_{};
 
-  void reorthogonalize_against(typename BMV::BlockView V_next, unsigned int count, typename B::BlockMatrix::BlockView tmp) { reorth_(*op, V, count, V_next, tmp); }
+  void reorthogonalize_against(typename BMV::BlockView V_next, unsigned int count, typename B::DenseMatrix tmp) { reorth_(*op, V, count, V_next, tmp); }
 
   std::shared_ptr<O> op;
   [[no_unique_address]] B backend;
