@@ -162,7 +162,11 @@ int main()
   auto roofline = std::min(peak_flops, peak_bw * ai);
   auto kernel = flops / (sycl_kernel_min * 1e-3);
 
-  std::cout << "  Roofline: " << roofline << "\n";
-  std::cout << "  Kernel:   " << kernel << "\n";
+  std::cout << "  Roofline: " << roofline << " FLOP/s\n";
+  std::cout << "  Kernel:   " << kernel << " FLOP/s\n";
   std::cout << "  K / R:    " << kernel / roofline << "\n";
+  // Same statement in bandwidth terms; the dot kernel streams `bytes` per call,
+  // so this is directly comparable to the measured read stream above.
+  std::cout << "  Kernel bandwidth: " << (bytes / (sycl_kernel_min * 1e-3)) / 1e9 << " GB/s ("
+            << 100.0 * (bytes / (sycl_kernel_min * 1e-3)) / peak_bw << "% of read stream)\n";
 }

@@ -20,9 +20,25 @@
  *                    this backend/toolchain can extract from the device --
  *                    intentionally *not* the paper peak.
  *
- *  All probes use a contiguous-chunk access pattern (each work-item owns a
- *  contiguous index range) and report the *minimum* kernel time over several
- *  repeats, measured with SYCL event profiling.
+ *  Two details decide whether these probes measure main memory at all:
+ *
+ *  - Access pattern. On GPUs the work-items of a sub-group must touch
+ *    *consecutive* addresses or every load wastes most of its memory
+ *    transaction; on CPUs the opposite is true (each thread wants a
+ *    contiguous, prefetchable, vectorizable range). The probes therefore use
+ *    an interleaved (grid-stride) loop on GPU devices and a contiguous-chunk
+ *    loop everywhere else -- see detail::for_each_index().
+ *  - Working set. The arrays must be several times larger than the last level
+ *    cache, or the probe reports cache bandwidth. Modern GPUs have very large
+ *    L2s (96 MB on a GB202), so the default size is derived from the device's
+ *    reported cache size rather than fixed -- see detail::probe_bytes().
+ *
+ *  Partial reductions are combined per work-group and only the group leader
+ *  updates the global sink; one device-scope atomic per work-item would
+ *  serialize the whole probe and show up as (much) too little bandwidth.
+ *
+ *  All probes report the *minimum* kernel time over several repeats, measured
+ *  with SYCL event profiling.
  *
  *  Requirements:
  *  - The queue must be created with sycl::property::queue::enable_profiling().
@@ -58,16 +74,39 @@ namespace detail {
 /** @brief min for std::size_t that works inside device code on all backends. */
 inline std::size_t min_size(std::size_t a, std::size_t b) { return a < b ? a : b; }
 
-/** @brief Default launch configuration: enough work-items to occupy the device
- *  on both CPUs (where each work-item is a loop iteration in a chunked loop)
- *  and GPUs.
+/** @brief Default launch configuration: enough work-items to fill the device.
+ *
+ *  Work-items do not own a fixed amount of work (all probe loops are strided
+ *  over the whole array), so the only requirement is to saturate the machine:
+ *  a few resident waves per compute unit on GPUs, a handful of chunks per core
+ *  on CPUs.
  */
 inline sycl::nd_range<1> probe_range(const sycl::device& d)
 {
   const std::size_t max_wg = d.get_info<sycl::info::device::max_work_group_size>();
-  const std::size_t local = std::min<std::size_t>(128, max_wg);
-  constexpr std::size_t groups = 128;
+  const std::size_t cus = std::max<std::size_t>(1, d.get_info<sycl::info::device::max_compute_units>());
+
+  // GPU: several resident waves per compute unit. CPU: many more chunks than
+  // cores, so the backend's work-item loop still has something to vectorize.
+  const std::size_t local = std::min<std::size_t>(d.is_gpu() ? 256 : 128, max_wg);
+  const std::size_t groups = d.is_gpu() ? 8 * cus : 128;
   return {groups * local, local};
+}
+
+/** @brief Size of one probe array, chosen so the working set misses the LLC.
+ *
+ *  Uses several times the device's reported cache size, clamped into a sane
+ *  band and capped at a fraction of device memory (three of these are
+ *  allocated at once, on top of whatever the caller already holds).
+ */
+inline std::size_t probe_bytes(const sycl::device& d)
+{
+  const std::size_t cache = d.get_info<sycl::info::device::global_mem_cache_size>();
+  const std::size_t gmem = d.get_info<sycl::info::device::global_mem_size>();
+
+  std::size_t bytes = std::max<std::size_t>(8 * cache, std::size_t{256} << 20);
+  if (gmem > 0) bytes = std::min(bytes, gmem / 8);
+  return std::max<std::size_t>(bytes, std::size_t{32} << 20);
 }
 
 /** @brief Runs a kernel-submitting callable warmups + repeats times and
@@ -89,12 +128,37 @@ double min_kernel_ms(int warmups, int repeats, F&& submit)
   return best;
 }
 
-/** @brief Contiguous-chunk index range [begin, end) of work-item @p gid. */
-inline void chunk_range(std::size_t gid, std::size_t gsize, std::size_t n, std::size_t& begin, std::size_t& end)
+/** @brief Calls @p f for every index of [0, n) owned by this work-item.
+ *
+ *  @p interleaved selects the access pattern: grid-stride (consecutive
+ *  work-items touch consecutive elements, i.e. coalesced -- what a GPU wants)
+ *  or one contiguous chunk per work-item (what a CPU core wants).
+ */
+template <class F>
+inline void for_each_index(const sycl::nd_item<1>& it, std::size_t n, bool interleaved, F&& f)
 {
-  const std::size_t chunk = (n + gsize - 1) / gsize;
-  begin = min_size(gid * chunk, n);
-  end = min_size(begin + chunk, n);
+  const std::size_t gid = it.get_global_linear_id();
+  const std::size_t gsize = it.get_global_range().size();
+
+  if (interleaved) {
+    for (std::size_t i = gid; i < n; i += gsize) f(i);
+  } else {
+    const std::size_t chunk = (n + gsize - 1) / gsize;
+    const std::size_t begin = min_size(gid * chunk, n);
+    const std::size_t end = min_size(begin + chunk, n);
+    for (std::size_t i = begin; i < end; ++i) f(i);
+  }
+}
+
+/** @brief Adds the per-work-item @p value into @p sink with one atomic per group. */
+template <class T>
+inline void reduce_into(const sycl::nd_item<1>& it, T value, T* sink)
+{
+  const T group_sum = sycl::reduce_over_group(it.get_group(), value, sycl::plus<T>());
+  if (it.get_group().leader()) {
+    sycl::atomic_ref<T, sycl::memory_order::relaxed, sycl::memory_scope::device> sink_ref(*sink);
+    sink_ref += group_sum;
+  }
 }
 
 } // namespace detail
@@ -103,26 +167,33 @@ inline void chunk_range(std::size_t gid, std::size_t gsize, std::size_t n, std::
  *
  *  @param q                       Queue with enable_profiling; all probes run here.
  *  @param stream_bytes_per_array  Size of each stream array (three are used).
- *                                 Should be several times larger than the last
- *                                 level cache so the probes hit main memory.
+ *                                 Must be several times larger than the last
+ *                                 level cache so the probes hit main memory;
+ *                                 0 (the default) derives it from the device.
  */
 template <class T = double>
-DevicePeaks measure_peaks(sycl::queue& q, std::size_t stream_bytes_per_array = std::size_t{32} << 20)
+DevicePeaks measure_peaks(sycl::queue& q, std::size_t stream_bytes_per_array = 0)
 {
-  const auto range = detail::probe_range(q.get_device());
+  const auto dev = q.get_device();
+  const auto range = detail::probe_range(dev);
+  const bool interleaved = dev.is_gpu();
+  if (stream_bytes_per_array == 0) stream_bytes_per_array = detail::probe_bytes(dev);
   const std::size_t n = stream_bytes_per_array / sizeof(T);
 
   T* a = sycl::malloc_device<T>(n, q);
   T* b = sycl::malloc_device<T>(n, q);
   T* c = sycl::malloc_device<T>(n, q);
   T* sink = sycl::malloc_device<T>(1, q);
-  q.memset(a, 0x01, n * sizeof(T)); // non-zero bit pattern -> normal doubles
-  q.memset(b, 0x01, n * sizeof(T));
+  q.fill(a, static_cast<T>(1.0000000001), n);
+  q.fill(b, static_cast<T>(0.9999999999), n);
   q.memset(c, 0, n * sizeof(T));
   q.wait();
 
   DevicePeaks peaks;
-  std::cerr << "[peaks] alloc+init done (" << (3.0 * n * sizeof(T) / (1 << 20)) << " MiB)\n" << std::flush;
+  std::cerr << "[peaks] alloc+init done (3 x " << (stream_bytes_per_array / (1 << 20)) << " MiB, "
+            << range.get_global_range().size() / range.get_local_range().size() << " groups x "
+            << range.get_local_range().size() << ", " << (interleaved ? "interleaved" : "chunked") << ")\n"
+            << std::flush;
 
   // -------------------------------------------------------------------
   // STREAM triad: c[i] = a[i] + alpha * b[i]   (2 reads + 1 write)
@@ -132,9 +203,7 @@ DevicePeaks measure_peaks(sycl::queue& q, std::size_t stream_bytes_per_array = s
     auto submit = [&] {
       return q.submit([&](sycl::handler& cgh) {
         cgh.parallel_for(range, [=](sycl::nd_item<1> it) {
-          std::size_t begin, end;
-          detail::chunk_range(it.get_global_linear_id(), it.get_global_range().size(), n, begin, end);
-          for (std::size_t i = begin; i < end; ++i) c[i] = a[i] + alpha * b[i];
+          detail::for_each_index(it, n, interleaved, [=](std::size_t i) { c[i] = a[i] + alpha * b[i]; });
         });
       });
     };
@@ -152,12 +221,9 @@ DevicePeaks measure_peaks(sycl::queue& q, std::size_t stream_bytes_per_array = s
     auto submit = [&] {
       return q.submit([&](sycl::handler& cgh) {
         cgh.parallel_for(range, [=](sycl::nd_item<1> it) {
-          std::size_t begin, end;
-          detail::chunk_range(it.get_global_linear_id(), it.get_global_range().size(), n, begin, end);
           T sum = 0;
-          for (std::size_t i = begin; i < end; ++i) sum += a[i];
-          sycl::atomic_ref<T, sycl::memory_order::relaxed, sycl::memory_scope::device> sink_ref(*sink);
-          sink_ref += sum;
+          detail::for_each_index(it, n, interleaved, [&](std::size_t i) { sum += a[i]; });
+          detail::reduce_into(it, sum, sink);
         });
       });
     };
@@ -201,8 +267,7 @@ DevicePeaks measure_peaks(sycl::queue& q, std::size_t stream_bytes_per_array = s
           T sum = 0;
           for (int k = 0; k < kAcc; ++k)
             for (int l = 0; l < kVec; ++l) sum += acc[k][l];
-          sycl::atomic_ref<T, sycl::memory_order::relaxed, sycl::memory_scope::device> sink_ref(*sink);
-          sink_ref += sum;
+          detail::reduce_into(it, sum, sink);
         });
       });
     };
