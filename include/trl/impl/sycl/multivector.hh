@@ -9,6 +9,7 @@
 #include "blockmatrix.hh"
 #include "blockview.hh"
 #include "dense_matrix.hh"
+#include "launch_config.hh"
 #include "panel_view.hh"
 
 namespace trl::Sycl {
@@ -35,22 +36,24 @@ public:
       : queue(queue)
       , rows(rows)
       , blocks_(cols / blocksize)
+      , launch(dot_launch(queue.get_device(), rows))
   {
     if (cols % blocksize != 0) throw std::invalid_argument("Number of columns must be divisible by blocksize");
 
     data = sycl::malloc_device<T>(rows * cols, queue);
     queue.memset(data, 0, rows * cols * sizeof(T)).wait();
-    scratch = sycl::malloc_device<T>(BlockView::dot_num_groups * bs * bs, queue);
+    scratch = sycl::malloc_device<T>(launch.num_groups * bs * bs, queue);
   }
 
   BlockMultivector(const BlockMultivector& other)
       : queue(other.queue)
       , rows(other.rows)
       , blocks_(other.blocks_)
+      , launch(other.launch)
   {
     data = sycl::malloc_device<T>(rows * blocks_ * bs, queue);
     queue.memset(data, 0, rows * blocks_ * bs * sizeof(T)).wait();
-    scratch = sycl::malloc_device<T>(BlockView::dot_num_groups, queue);
+    scratch = sycl::malloc_device<T>(launch.num_groups * bs * bs, queue);
   }
 
   BlockMultivector& operator=(const BlockMultivector& other)
@@ -62,9 +65,10 @@ public:
       queue = other.queue;
       rows = other.rows;
       blocks_ = other.blocks_;
+      launch = other.launch;
       data = sycl::malloc_device<T>(rows * blocks_ * bs, queue);
       queue.memset(data, 0, rows * blocks_ * bs * sizeof(T)).wait();
-      scratch = sycl::malloc_device<T>(BlockView::dot_num_groups, queue);
+      scratch = sycl::malloc_device<T>(launch.num_groups * bs * bs, queue);
     }
     return *this;
   }
@@ -73,6 +77,7 @@ public:
       : queue(std::move(other.queue))
       , rows(other.rows)
       , blocks_(other.blocks_)
+      , launch(other.launch)
       , data(other.data)
       , scratch(other.scratch)
   {
@@ -88,6 +93,7 @@ public:
       queue = other.queue;
       rows = other.rows;
       blocks_ = other.blocks_;
+      launch = other.launch;
       data = other.data;
       scratch = other.scratch;
       other.data = nullptr;
@@ -118,7 +124,7 @@ public:
     assert(first < blocks_);
     assert(first + count < blocks_ + 1);
     assert(count >= 1);
-    return {&queue, data + first * rows * bs, rows, count, scratch};
+    return {&queue, data + first * rows * bs, rows, count, scratch, launch};
   }
 
 private:
@@ -127,11 +133,15 @@ private:
   std::size_t rows;
   std::size_t blocks_;
 
+  // Launch geometry for the dot kernel, derived from the device once here and
+  // handed to every view: it also fixes the size of the scratch buffer below.
+  DotLaunch launch;
+
   T* data;
 
-  // Scratch for the two-phase dot kernel (one slot per work-group), shared by
-  // all block views. View operations are serialized by the in-order queue, so
-  // no two kernels can race on it.
+  // Scratch for the two-phase dot kernel (bs * bs slots per work-group),
+  // shared by all block views. View operations are serialized by the in-order
+  // queue, so no two kernels can race on it.
   T* scratch = nullptr;
 };
 } // namespace trl::Sycl

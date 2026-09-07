@@ -3,6 +3,7 @@
 #include "trl/concepts.hh"
 #include "trl/helpers.hh"
 #include "trl/impl/sycl/dense_matrix.hh"
+#include "trl/impl/sycl/launch_config.hh"
 
 #include <cstddef>
 #include <hipSYCL/sycl/libkernel/memory.hpp>
@@ -13,15 +14,16 @@ namespace trl::Sycl {
 template <class T, unsigned int bs>
 class PanelView {
 public:
-  static constexpr std::size_t dot_local_size = 128;
-  static constexpr std::size_t dot_num_groups = 128;
-
-  PanelView(sycl::queue* q_, T* start, std::size_t rows, unsigned int count, T* scratch)
+  /** @param launch Launch geometry for dot; @p scratch must hold at least
+   *  launch.num_groups * bs * bs entries. Both come from the owning
+   *  BlockMultivector, which derives them from the device. */
+  PanelView(sycl::queue* q_, T* start, std::size_t rows, unsigned int count, T* scratch, DotLaunch launch)
       : q(q_)
       , start_(start)
       , rows_(rows)
       , count_(count)
       , scratch_(scratch)
+      , launch_(launch)
   {
   }
 
@@ -44,9 +46,9 @@ public:
   {
     TRL_CHECK(count_ == 1, "Only the single block panel case is implemented");
 
-    constexpr auto local_size = dot_local_size;
-    constexpr auto num_groups = dot_num_groups;
-    constexpr auto global_size = num_groups * local_size;
+    const auto local_size = launch_.local_size;
+    const auto global_size = launch_.global_size();
+    const bool interleaved = launch_.interleaved;
 
     const T* a = data();
     const T* b = Y.data();
@@ -61,13 +63,28 @@ public:
       cgh.parallel_for(sycl::nd_range<1>(global_size, local_size), [=](sycl::nd_item<1> it) {
         const std::size_t gid = it.get_global_linear_id();
         const std::size_t gsize = it.get_global_range().size();
-        const std::size_t chunk = (n + gsize - 1) / gsize;
-        const std::size_t begin = sycl::min(gid * chunk, n);
-        const std::size_t end = sycl::min(begin + chunk, n);
+
+        // The two loops differ only in how rows are distributed; the body is
+        // repeated rather than hoisted into a lambda or a runtime stride so
+        // that the chunked variant keeps its literal stride of 1 (which is
+        // what lets the CPU backends vectorize it).
         T sum[bs * bs] = {0};
-        for (auto i = begin; i < end; ++i)
-          for (unsigned int I = 0; I < bs; ++I)
-            for (unsigned int J = 0; J < bs; ++J) sum[I * bs + J] += a[i * bs + I] * b[i * bs + J];
+        if (interleaved) {
+          // GPU: consecutive work-items take consecutive rows, so the loads of
+          // a sub-group cover one contiguous bs * sizeof(T) * sub_group_size
+          // span and coalesce into full transactions.
+          for (std::size_t i = gid; i < n; i += gsize)
+            for (unsigned int I = 0; I < bs; ++I)
+              for (unsigned int J = 0; J < bs; ++J) sum[I * bs + J] += a[i * bs + I] * b[i * bs + J];
+        } else {
+          // CPU: one contiguous, prefetchable chunk of rows per work-item.
+          const std::size_t chunk = (n + gsize - 1) / gsize;
+          const std::size_t begin = sycl::min(gid * chunk, n);
+          const std::size_t end = sycl::min(begin + chunk, n);
+          for (std::size_t i = begin; i < end; ++i)
+            for (unsigned int I = 0; I < bs; ++I)
+              for (unsigned int J = 0; J < bs; ++J) sum[I * bs + J] += a[i * bs + I] * b[i * bs + J];
+        }
 
         T reduced_sums[bs * bs];
         // Note: Do not nest this loop. A compiler bug in AdaptiveCpp miscompiles this (see https://github.com/AdaptiveCpp/AdaptiveCpp/issues/2224)
@@ -93,7 +110,7 @@ public:
     //   for (unsigned int I = 0; I < bs; ++I)
     //     for (unsigned int J = 0; J < bs; ++J) c[I * bs + J] = 0;
 
-    //   for (std::size_t i = 0; i < num_groups; ++i) {
+    //   for (std::size_t i = 0; i < launch_.num_groups; ++i) {
     //     for (unsigned int I = 0; I < bs; ++I)
     //       for (unsigned int J = 0; J < bs; ++J) c[I * bs + J] += s[i * bs * bs + I * bs + J];
     //   }
@@ -116,6 +133,8 @@ private:
   unsigned int count_;
 
   T* scratch_;
+
+  DotLaunch launch_;
 };
 
 } // namespace trl::Sycl
