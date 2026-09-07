@@ -52,13 +52,9 @@ public:
     const auto ldb = M.cols(); // M is row-major, so its row stride is its column count
 
     sycl::event mult_event = q->submit([&](sycl::handler& cgh) {
-      sycl::local_accessor<T, 1> V_local(sycl::range<1>(cols()), cgh);
       cgh.parallel_for(sycl::range<1>(n), [=](sycl::id<1> id) {
         auto tid = id[0];
 
-        for (unsigned int Bi=0; Bi<in_blocks; ++Bi)
-          for (unsigned int i=0; i<bs; ++i)
-            V_local[Bi*bs + i] = a[Bi * n * bs + tid * bs + i];
         // Output block Bo takes a contribution from *every* input block Bi:
         // out(:, Bo*bs + i) = sum over Bi, j of this(:, Bi*bs + j) * M(Bi*bs + j, Bo*bs + i).
         // The bs accumulators of one output block stay in registers across the
@@ -71,7 +67,7 @@ public:
             const T* a_base = a + Bi * n * bs;
 
             T a_private[bs];
-            for (unsigned int j = 0; j < bs; ++j) a_private[j] = V_local[Bi * bs + j];
+            for (unsigned int j = 0; j < bs; ++j) a_private[j] = a_base[tid * bs + j];
 
             for (unsigned int i = 0; i < bs; ++i)
               for (unsigned int j = 0; j < bs; ++j) c_private[i] += a_private[j] * b[(Bi * bs + j) * ldb + (Bo * bs + i)];
