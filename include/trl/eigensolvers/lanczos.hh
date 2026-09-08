@@ -150,7 +150,6 @@ public:
       auto Tkkd = typename B::DenseMatrix(Tkk.data(), blocksize, blocksize);
       op->dot(Vk, Vk1, Tkkd);
 
-      auto W0 = W.block_view(0);    // temp storage
       auto Z0 = U.block_view(0, 1); // temp storage
       Vk1.subtract_product(TransposeMode::NoTranspose, Vk, Tkkd);
 
@@ -207,7 +206,6 @@ public:
 
     unsigned int n_op_apply = 0;
 
-    auto W0 = W.block_view(0);
     auto beta = U.block_view(0, 0);
     auto Z0 = U.block_view(0, 1); // temp storage
 
@@ -239,8 +237,6 @@ public:
 
       // Step 4: Orthogonalise v_{i+1} -= v_i * T(i,i)
       V_next.subtract_product(TransposeMode::NoTranspose, V_curr, Tii_dense);
-      // V_curr.mult(TransposeMode::NoTranspose, Tii_dense, W0);
-      // V_next.subtract(W0);
 
       // Step 5: Full reorthogonalization
       auto Z0_dense = typename B::DenseMatrix(Z0.data(), blocksize, blocksize);
@@ -397,9 +393,7 @@ private:
       RR = stored_R.inverse().eval();
     } // flush: beta holds U^{-1} on the device
 
-    auto Vtemp0 = W.block_view(0);
-    V_next.mult(TransposeMode::NoTranspose, beta_dense, V_next); // V_temp = V * U^{-1}
-    // V_next.copy_from(Vtemp0);
+    V_next.mult(TransposeMode::NoTranspose, beta_dense, V_next); // V_next *= U^{-1}
 
     // 4. Restore U in R (the Cholesky factor, not its inverse)
     {
