@@ -25,8 +25,8 @@ public:
   {
     // Hoisted into locals: a device lambda cannot capture `this`.
     const std::size_t n = n_;
-    const T* X_data = X.data;
-    T* Y_data = Y.data;
+    const T* X_data = X.data();
+    T* Y_data = Y.data();
 
     queue.parallel_for(sycl::range<1>(n), [=](sycl::id<1> idx) {
       const std::size_t k = idx[0];

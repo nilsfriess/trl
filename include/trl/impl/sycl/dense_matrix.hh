@@ -10,10 +10,7 @@
 namespace trl::Sycl {
 /** @brief Non-owning view of a row-major dense matrix in device memory.
  *
- *  Carries a leading dimension, so a view can name a sub-block of a larger
- *  matrix: the Lanczos coefficient vector for step i is the
- *  (i+1)*bs x bs sub-block of the projected matrix T at column i*bs, and every
- *  kernel that touches it needs a row stride independent of its column count.
+ *  @todo: Probably all the parallel_for operations should be single_task?
  */
 template <class T>
 class DenseMatrix {
@@ -59,7 +56,7 @@ public:
     const auto n_cols = cols();
     const auto ld_d = ld();
     const auto ld_s = other.ld();
-    q->parallel_for(sycl::range<1>(size()), [d, s, n_cols, ld_d, ld_s](sycl::id<1> id) {
+    q->parallel_for(sycl::range<1>(size()), [=](sycl::id<1> id) {
       const auto k = id[0];
       const auto r = k / n_cols;
       const auto c = k % n_cols;
@@ -91,7 +88,7 @@ public:
     const auto n_cols = cols();
     const auto ld_d = ld();
     const auto ld_s = other.ld();
-    q->parallel_for(sycl::range<1>(size()), [d, s, n_cols, ld_d, ld_s](sycl::id<1> id) {
+    q->parallel_for(sycl::range<1>(size()), [=](sycl::id<1> id) {
       const auto k = id[0];
       const auto r = k / n_cols;
       const auto c = k % n_cols;

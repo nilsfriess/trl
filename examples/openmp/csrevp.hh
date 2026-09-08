@@ -29,8 +29,8 @@ public:
   {
     constexpr auto storage = bs == 1 ? Eigen::ColMajor : Eigen::RowMajor;
 
-    Eigen::Map<Eigen::Matrix<T, Eigen::Dynamic, bs, storage>> Xmap(X.data_, A.rows(), bs);
-    Eigen::Map<Eigen::Matrix<T, Eigen::Dynamic, bs, storage>> Ymap(Y.data_, A.rows(), bs);
+    Eigen::Map<Eigen::Matrix<T, Eigen::Dynamic, bs, storage>> Xmap(X.data(), A.rows(), bs);
+    Eigen::Map<Eigen::Matrix<T, Eigen::Dynamic, bs, storage>> Ymap(Y.data(), A.rows(), bs);
 
     Ymap = A.template selfadjointView<Eigen::Lower>() * Xmap;
   }
@@ -68,8 +68,8 @@ public:
 
   void apply(typename Backend::Multivector::BlockView X, typename Backend::Multivector::BlockView Y)
   {
-    Eigen::Map<Eigen::Matrix<T, Eigen::Dynamic, bs, storage>> Xmap(X.data_, B.rows(), bs);
-    Eigen::Map<Eigen::Matrix<T, Eigen::Dynamic, bs, storage>> Ymap(Y.data_, B.rows(), bs);
+    Eigen::Map<Eigen::Matrix<T, Eigen::Dynamic, bs, storage>> Xmap(X.data(), B.rows(), bs);
+    Eigen::Map<Eigen::Matrix<T, Eigen::Dynamic, bs, storage>> Ymap(Y.data(), B.rows(), bs);
 
     tmp = B.template selfadjointView<Eigen::Lower>() * Xmap;
 
@@ -79,13 +79,13 @@ public:
     Ymap = Ytmp;
   }
 
-  void dot(typename Backend::Multivector::BlockView V, typename Backend::Multivector::BlockView W, typename Backend::BlockMatrix::BlockView R)
+  void dot(typename Backend::Multivector::PanelView V, typename Backend::Multivector::BlockView W, typename Backend::DenseMatrix R)
   {
-    Eigen::Map<Eigen::Matrix<T, Eigen::Dynamic, bs, storage>> Wmap(W.data_, B.rows(), bs);
+    Eigen::Map<Eigen::Matrix<T, Eigen::Dynamic, bs, storage>> Wmap(W.data(), B.rows(), bs);
 
     tmp = B.template selfadjointView<Eigen::Lower>() * Wmap;
 
-    typename Backend::Multivector::BlockView Tview(tmp.data(), B.rows());
+    typename Backend::Multivector::BlockView Tview(tmp.data(), B.rows(), 1);
     V.dot(Tview, R);
   }
 

@@ -10,13 +10,7 @@
 #include <vector>
 
 namespace trl::Sycl {
-/** @brief A view of `count` consecutive blocks of a BlockMultivector.
- *
- *  The unit the Lanczos iteration actually works in: a panel is a block of
- *  blocks, and a single block is just the count == 1 case. Every operation
- *  parallelises over the rows, never over the block count, so the launch
- *  geometry is independent of how wide the panel is.
- */
+/** @brief A view of `count` consecutive blocks of a BlockMultivector. */
 template <class T, unsigned int bs>
 class PanelView {
 public:
@@ -174,8 +168,7 @@ public:
       // closure by first use in the body, and any 4- or 1-byte capture sitting before
       // a pointer leaves alignment padding that AdaptiveCpp emits as one kernel
       // parameter per padding byte.
-      cgh.parallel_for(sycl::nd_range<2>(sycl::range<2>(global_size, count_), sycl::range<2>(local_size, 1)),
-                       [a, b, c, n, ldc, is_interleaved](sycl::nd_item<2> it) {
+      cgh.parallel_for(sycl::nd_range<2>(sycl::range<2>(global_size, count_), sycl::range<2>(local_size, 1)), [a, b, c, n, ldc, is_interleaved](sycl::nd_item<2> it) {
         const std::size_t gid = it.get_global_id(0);
         const std::size_t gsize = it.get_global_range(0);
         const std::size_t B = it.get_global_id(1); // which block of the panel this group reduces

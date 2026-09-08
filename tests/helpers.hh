@@ -1,6 +1,7 @@
 #pragma once
 
 #include <chrono>
+#include <cmath>
 #include <iostream>
 #include <string>
 #include <type_traits>
@@ -33,7 +34,12 @@ std::string type_str()
   else return "unknown";
 }
 
-// Helper to verify orthogonality of V blocks
+/** @brief Verifies that every block of V is orthonormal and mutually orthogonal.
+ *
+ *  One panel dot per block gives the whole column of the Gram matrix, so the
+ *  check costs V.blocks() kernels and as many transfers rather than the
+ *  quadratic number of block dots it used to.
+ */
 template <trl::BackendConcept B>
 bool check_orthogonality(B& backend, typename B::Multivector& V, typename B::Scalar tolerance, bool verbose)
 {
@@ -41,41 +47,30 @@ bool check_orthogonality(B& backend, typename B::Multivector& V, typename B::Sca
   constexpr auto bs = B::blocksize;
 
   if (verbose) std::cout << "  Checking orthogonality of V blocks..." << std::endl;
+
+  const auto nb = static_cast<unsigned int>(V.blocks());
+  auto G = backend.make_dense_matrix(nb * bs, bs);
+  auto Vp = V.panel_view(0, nb);
+
   Scalar max_offdiag = 0;
   Scalar max_diag_error = 0;
   int max_offdiag_i = -1, max_offdiag_j = -1;
 
-  auto temp = backend.make_blockmatrix(1, 1);
-  auto temp_block = temp.block_view(0, 0);
+  for (unsigned int i = 0; i < nb; ++i) {
+    Vp.dot(V.block_view(i), G);
 
-  for (unsigned int i = 0; i < V.blocks(); ++i) {
-    auto Vi = V.block_view(i);
-
-    // Check V_i^T * V_i = I
-    Vi.dot(Vi, temp_block);
-
-    {
-      auto temp_block_host = backend.host_block(temp_block, Access::Read);
+    auto host = backend.host_block(G, Access::Read);
+    for (unsigned int j = 0; j < nb; ++j) {
       for (unsigned int r = 0; r < bs; ++r) {
         for (unsigned int c = 0; c < bs; ++c) {
-          auto val = temp_block_host[r * bs + c];
-          if (r == c) max_diag_error = std::max(max_diag_error, std::abs(val - Scalar(1.0)));
-          else max_offdiag = std::max(max_offdiag, std::abs(val));
-        }
-      }
-    }
+          const auto value = host[(j * bs + r) * bs + c];
 
-    // Check V_i^T * V_j ≈ 0 for j < i
-    for (unsigned int j = 0; j < i; ++j) {
-      auto Vj = V.block_view(j);
-      Vi.dot(Vj, temp_block);
-
-      auto temp_block_host = backend.host_block(temp_block, Access::Read);
-      for (unsigned int k = 0; k < bs * bs; ++k) {
-        if (std::abs(temp_block_host[k]) > max_offdiag) {
-          max_offdiag = std::abs(temp_block_host[k]);
-          max_offdiag_i = static_cast<int>(i);
-          max_offdiag_j = static_cast<int>(j);
+          if (i == j and r == c) max_diag_error = std::max(max_diag_error, std::abs(value - Scalar(1)));
+          else if (std::abs(value) > max_offdiag) {
+            max_offdiag = std::abs(value);
+            max_offdiag_i = static_cast<int>(i);
+            max_offdiag_j = static_cast<int>(j);
+          }
         }
       }
     }

@@ -1,46 +1,45 @@
 #pragma once
 
 #include "trl/concepts.hh"
-#include "trl/impl/openmp/blockmatrix.hh"
+#include "trl/helpers.hh"
+#include "trl/impl/openmp/dense_matrix.hh"
 #include "trl/impl/openmp/multivector.hh"
 
-#include <algorithm>
-#include <array>
 #include <cstddef>
 
 namespace trl::openmp {
 /** @brief Stateless OpenMP backend.
  *
  *  Names the storage types, allocates them, and owns the host<->device
- *  boundary. On OpenMP the device is the host, so sync() is a no-op and
- *  to_host() is a plain copy.
+ *  boundary. On OpenMP the device is the host, so sync() is a no-op.
  */
 template <class T, unsigned int bs>
 struct Backend {
   using Scalar = T;
-  using Multivector = ::trl::openmp::BlockMultivector<T, bs>;
-  using BlockMatrix = ::trl::openmp::BlockMatrix<T, bs>;
+  using Multivector = BlockMultivector<T, bs>;
+  using DenseMatrix = ::trl::openmp::DenseMatrix<T>;
+  using OwnedDenseMatrix = ::trl::openmp::OwnedDenseMatrix<T>;
   static constexpr unsigned int blocksize = bs;
 
-  /** @brief Host mirror of a block.
+  /** @brief Host mirror of a matrix or a multivector block.
    *
-   *  On OpenMP the device is the host, so the mirror aliases the block's own
-   *  storage: there is nothing to copy and Access is irrelevant.
+   *  The storage is already host memory, so the mirror aliases it and Access
+   *  is irrelevant: there is nothing to stage in or out.
    */
-  class HostMirror {
+  class HostBlock {
   public:
-    HostMirror(Scalar* ptr, std::size_t size)
+    HostBlock(Scalar* ptr, std::size_t size)
         : ptr(ptr)
         , size_(size)
     {
     }
 
-    HostMirror(const HostMirror&) = delete;
-    HostMirror(HostMirror&&) = delete;
-    HostMirror& operator=(const HostMirror&) = delete;
-    HostMirror& operator=(HostMirror&&) = delete;
+    HostBlock(const HostBlock&) = delete;
+    HostBlock(HostBlock&&) = delete;
+    HostBlock& operator=(const HostBlock&) = delete;
+    HostBlock& operator=(HostBlock&&) = delete;
 
-    ~HostMirror() = default;
+    ~HostBlock() = default;
 
     Scalar& operator[](std::size_t i) { return ptr[i]; }
     const Scalar& operator[](std::size_t i) const { return ptr[i]; }
@@ -56,18 +55,16 @@ struct Backend {
   };
 
   Multivector make_multivector(std::size_t n, unsigned int cols) const { return {n, cols}; }
-  BlockMatrix make_blockmatrix(unsigned int br, unsigned int bc) const { return {br, bc}; }
+  OwnedDenseMatrix make_dense_matrix(unsigned int rows, unsigned int cols) const { return {rows, cols}; }
 
   void sync() const {}
 
-  HostMirror host_block(BlockMatrix& M, [[maybe_unused]] Access access) const
+  HostBlock host_block(DenseMatrix M, [[maybe_unused]] Access access) const
   {
-    const auto n_total = M.block_rows() * M.block_cols() * blocksize * blocksize;
-    return {M.data, n_total};
+    TRL_CHECK(M.contiguous(), "host_block requires a contiguous matrix");
+    return {M.data(), M.size()};
   }
 
-  HostMirror host_block(typename BlockMatrix::BlockView B, [[maybe_unused]] Access access) const { return {B.data_, bs * bs}; }
-
-  HostMirror host_block(typename Multivector::BlockView V, [[maybe_unused]] Access access) const { return {V.data_, V.rows() * V.cols()}; }
+  HostBlock host_block(typename Multivector::BlockView V, [[maybe_unused]] Access access) const { return {V.data(), V.rows() * V.cols()}; }
 };
 } // namespace trl::openmp
