@@ -5,9 +5,8 @@
  *  this measures the tall-skinny GEMM behind PERFORMANCE.md pattern 4 (the
  *  restart Ritz back-transform): V is n x ncv, M is ncv x nev, W is n x nev.
  *
- *  Note that PanelView::mult is still a stub, so this aborts at the first
- *  call. It compiles and its reference path is exercised, so it is ready to
- *  validate an implementation the moment there is one.
+ *  Both TransposeMode::NoTranspose and TransposeMode::Transpose are checked
+ *  for correctness against the Eigen reference; only NoTranspose is timed.
  *
  *  Panel layout: a panel of `count` blocks is `count` consecutive n x bs
  *  row-major blocks, *not* one n x (count * bs) row-major array. Column q of
@@ -25,6 +24,7 @@
 #include "roofline.hh"
 
 #include <Eigen/Core>
+#include <algorithm>
 #include <cstddef>
 #include <cstdlib>
 #include <iostream>
@@ -146,14 +146,9 @@ int main(int argc, char** argv)
   const RowMajorMatrix<Scalar> ref = Vm * Mm;
 
   // ---------------------------------------------------------------------
-  // Correctness check: SYCL mult vs. the Eigen reference.
+  // Correctness check: both SYCL mult variants vs. the Eigen reference.
   // ---------------------------------------------------------------------
-  {
-    std::cout << "Correctness check:\n";
-
-    V.panel_view(0, in_blocks).mult(trl::TransposeMode::NoTranspose, M, W.panel_view(0, out_blocks));
-    q.wait();
-
+  auto check_against_ref = [&](const char* mode) {
     const auto Wh = backend.host_block(W.panel_view(0, out_blocks), trl::Access::Read);
     const auto got = gather_panel<Scalar, blocksize>(Wh.data(), n, out_blocks);
 
@@ -169,11 +164,35 @@ int main(int argc, char** argv)
     // Same tolerance as dot.cc. The device reduces in a different order than
     // Eigen, so expect ~sqrt(n) * eps of genuine disagreement; a real bug is
     // orders of magnitude larger than that.
-    std::cout << "  worst relative column error: " << worst << "\n";
+    std::cout << "  " << mode << ": worst relative column error: " << worst << "\n";
     const bool correct = worst < 1e-10;
-    std::cout << "  Result is " << (correct ? "correct" : "wrong") << "\n\n";
-    if (!correct) return EXIT_FAILURE;
+    std::cout << "  Result is " << (correct ? "correct" : "wrong") << "\n";
+    return correct;
+  };
+
+  std::cout << "Correctness check:\n";
+
+  V.panel_view(0, in_blocks).mult(trl::TransposeMode::NoTranspose, M, W.panel_view(0, out_blocks));
+  q.wait();
+  bool correct = check_against_ref("NoTranspose");
+
+  // For TransposeMode::Transpose the kernel expects the transpose factor
+  // stored row-major as (out.cols() x cols()), so we hand it M^T: the
+  // mathematical product V * M -- and hence the reference -- is the same as
+  // above, which is exactly what makes the two kernel paths comparable.
+  RowMajorMatrix<Scalar> Mtm = Mm.transpose();
+  DenseMatrix<Scalar> Mt(q, nev, ncv);
+  {
+    auto host = backend.host_block(Mt, trl::Access::Write);
+    std::copy_n(Mtm.data(), static_cast<std::size_t>(Mtm.size()), host.data());
   }
+
+  V.panel_view(0, in_blocks).mult(trl::TransposeMode::Transpose, Mt, W.panel_view(0, out_blocks));
+  q.wait();
+  correct = check_against_ref("Transpose") && correct;
+
+  std::cout << "\n";
+  if (!correct) return EXIT_FAILURE;
 
   // ---------------------------------------------------------------------
   // Benchmark: Eigen on the host.

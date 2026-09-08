@@ -33,15 +33,25 @@ public:
 
   /** @brief Computes out = this * M (or this * M^T for TransposeMode::Transpose).
    *
-   *  @p M is (cols() x out.cols()) row-major for NoTranspose. If @p events is
+   *  @p M is (cols() x out.cols()) row-major for NoTranspose and
+   *  (out.cols() x cols()) row-major for TransposeMode::Transpose, i.e. the
+   *  transpose factor itself is stored rather than computed. If @p events is
    *  given, the events of all submitted kernels are appended to it, as in dot.
    */
   void mult(TransposeMode t, const DenseMatrix<T>& M, PanelView out, std::vector<sycl::event>* events = nullptr)
   {
-    TRL_CHECK(t == TransposeMode::NoTranspose, "Only TransposeMode::NoTranspose implementd");
     TRL_CHECK(rows() == out.rows(), "Input panel and output panel must have the same number of rows");
-    TRL_CHECK(cols() == M.rows(), "Number of columns of input panel must match number of rows of matrix");
-    TRL_CHECK(M.cols() == out.cols(), "Number of columns of output panel must match number of cols of matrix");
+    if (t == TransposeMode::NoTranspose) {
+      TRL_CHECK(cols() == M.rows(), "Number of columns of input panel must match number of rows of matrix");
+      TRL_CHECK(M.cols() == out.cols(), "Number of columns of output panel must match number of cols of matrix");
+    }
+    else {
+      TRL_CHECK(out.cols() == M.rows(), "For TransposeMode::Transpose the matrix must be stored as (out.cols() x cols())");
+      TRL_CHECK(M.cols() == cols(), "For TransposeMode::Transpose the number of columns of the matrix must match the number of columns of the input panel");
+    }
+
+    // When in and out alias, the kernel below only works for single-block panels
+    if (out.data() == data()) TRL_CHECK(count_ == 1 && out.count_ == 1, "In-place mult is only supported for single-block panels");
 
     const T* a = data();
     const T* b = M.data();
@@ -51,14 +61,12 @@ public:
     const auto n = rows();
     const auto ldb = M.cols(); // M is row-major, so its row stride is its column count
 
+    sycl::specialized<bool> tp = (t == TransposeMode::Transpose);
+
     sycl::event mult_event = q->submit([&](sycl::handler& cgh) {
       cgh.parallel_for(sycl::range<1>(n), [=](sycl::id<1> id) {
         auto tid = id[0];
 
-        // Output block Bo takes a contribution from *every* input block Bi:
-        // out(:, Bo*bs + i) = sum over Bi, j of this(:, Bi*bs + j) * M(Bi*bs + j, Bo*bs + i).
-        // The bs accumulators of one output block stay in registers across the
-        // whole Bi loop, so out is written exactly once per row and block.
         for (unsigned int Bo = 0; Bo < out_blocks; ++Bo) {
           T c_private[bs];
           for (unsigned int i = 0; i < bs; ++i) c_private[i] = T{0};
@@ -70,7 +78,9 @@ public:
             for (unsigned int j = 0; j < bs; ++j) a_private[j] = a_base[tid * bs + j];
 
             for (unsigned int i = 0; i < bs; ++i)
-              for (unsigned int j = 0; j < bs; ++j) c_private[i] += a_private[j] * b[(Bi * bs + j) * ldb + (Bo * bs + i)];
+              for (unsigned int j = 0; j < bs; ++j)
+                if (tp) c_private[i] += a_private[j] * b[(Bo * bs + i) * ldb + (Bi * bs + j)];
+                else c_private[i] += a_private[j] * b[(Bi * bs + j) * ldb + (Bo * bs + i)];
           }
 
           T* c_base = c + Bo * n * bs;
@@ -81,7 +91,25 @@ public:
     if (events) events->push_back(mult_event);
   }
 
-  void subtract(PanelView other) { TRL_TODO("PanelView::subtract"); }
+  void subtract(PanelView other)
+  {
+    const auto n = rows();
+
+    q->submit([&](auto& cgh) {
+      auto* a = data();
+      const auto* b = other.data();
+      sycl::specialized<unsigned int> n_blocks(count_);
+
+      cgh.parallel_for(sycl::range<1>(n), [=](sycl::id<1> id) {
+        auto tid = id[0];
+        for (unsigned int B = 0; B < n_blocks; ++B) {
+          auto* a_start = a + B * n * bs;
+          const auto* b_start = b + B * n * bs;
+          for (unsigned int i = 0; i < bs; ++i) a_start[tid * bs + i] -= b_start[tid * bs + i];
+        }
+      });
+    });
+  }
 
   /** @brief Computes out = this^T * Y.
    */
