@@ -78,7 +78,7 @@ int main()
     const auto Wh = backend.host_block(V.block_view(1), trl::Access::Read);
     const Eigen::Matrix<Scalar, blocksize, blocksize> ref_dot = eigen_dot<Scalar, blocksize>(Vh.data(), Wh.data(), n);
 
-    DenseMatrix<Scalar> M(q, blocksize, blocksize);
+    OwnedDenseMatrix<Scalar> M(q, blocksize, blocksize);
     V.block_view(0).dot(V.block_view(1), M);
     q.wait();
 
@@ -111,7 +111,7 @@ int main()
   // ---------------------------------------------------------------------
   // Benchmark: SYCL kernels, timed with host wall time and SYCL event profiling.
   // ---------------------------------------------------------------------
-  DenseMatrix<Scalar> M(q, blocksize, blocksize);
+  OwnedDenseMatrix<Scalar> M(q, blocksize, blocksize);
   std::vector<sycl::event> events;
   std::vector<double> kernel_times_ms;
   kernel_times_ms.reserve(static_cast<std::size_t>(repeats));

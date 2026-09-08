@@ -4,31 +4,51 @@
 
 namespace trl {
 
-/** @brief Modified Gram-Schmidt reorthogonalization.
+/** @brief Reorthogonalization strategies.
  *
- *  For each basis vector \f$ v_j \f$ in turn, projects out its component from
- *  \f$ v \f$ and updates \f$ v \f$ immediately before moving to \f$ v_{j+1} \f$.
+ *  A strategy orthogonalizes the block @p w against the panel @p Vp and leaves
+ *  the total projection Vp^T w in @p h.
+ *
+ *  @p scratch is a buffer of at least the shape of @p h, owned by the caller.
  */
-struct ModifiedGS {
-  template <class Op, class BlockMultivector, class DenseMatrix>
-  void operator()(Op& op, BlockMultivector& V, unsigned int count, typename BlockMultivector::BlockView V_next, DenseMatrix& tmp) const
+
+/** @brief Classical twice-is-enough Gram-Schmidt. */
+struct ClassicalGS2 {
+  template <class Op, class Backend, class Panel, class Dense>
+  void operator()(Op& op, Backend& backend, Panel Vp, Panel w, Dense h, Dense scratch) const
   {
-    for (unsigned int j = 0; j < count; ++j) {
-      auto Vj = V.block_view(j);
-      op.dot(Vj, V_next, tmp);
-      V_next.subtract_product(TransposeMode::NoTranspose, Vj, tmp);
+    const auto pass = [&](auto& hh) {
+      op.dot(Vp, w, hh);
+      w.subtract_product(TransposeMode::NoTranspose, Vp, hh);
+    };
+
+    auto h2 = scratch.block(0, 0, h.rows(), h.cols());
+    pass(h);
+    pass(h2);
+    h.add(h2);
+  }
+};
+
+/** @brief Modified Gram-Schmidt. */
+struct ModifiedGS {
+  template <class Op, class Backend, class Panel, class Dense>
+  void operator()(Op& op, Backend& backend, Panel Vp, Panel w, Dense h, Dense) const
+  {
+    constexpr unsigned int bs = Panel::blocksize;
+
+    for (unsigned int j = 0; j < Vp.blocks(); ++j) {
+      auto Vj = Vp.block(j);
+      auto hj = h.block(j * bs, 0, bs, bs);
+      op.dot(Vj, w, hj);
+      w.subtract_product(TransposeMode::NoTranspose, Vj, hj);
     }
   }
 };
 
-// /** @brief Concept for reorthogonalization strategies.
-//  *
-//  *  A strategy must be callable with (EVP&, BMV&, unsigned count, BlockView, BlockMatrixBlockView)
-//  *  and orthogonalize the BlockView against the first @p count blocks of the basis.
-//  */
-// template <typename R, typename Op, typename BMV>
-// concept ReorthogonalizationStrategy = requires(R r, Op& op, BMV& V, unsigned int count, typename BMV::BlockView v, typename BMV::BlockMatrix::BlockView tmp) {
-//   { r(op, V, count, v, tmp) } -> std::same_as<void>;
-// };
+/** @brief Concept for reorthogonalization strategies. */
+template <class R, class Op, class Backend, class Panel, class Dense>
+concept ReorthogonalizationStrategy = requires(R r, Op& op, Backend& backend, Panel Vp, Panel w, Dense h, Dense scratch) {
+  { r(op, backend, Vp, w, h, scratch) } -> std::same_as<void>;
+};
 
 } // namespace trl

@@ -6,28 +6,39 @@
 #include "trl/impl/sycl/launch_config.hh"
 
 #include <cstddef>
-#include <hipSYCL/sycl/libkernel/memory.hpp>
 #include <sycl/sycl.hpp>
 #include <vector>
 
 namespace trl::Sycl {
+/** @brief A view of `count` consecutive blocks of a BlockMultivector.
+ *
+ *  The unit the Lanczos iteration actually works in: a panel is a block of
+ *  blocks, and a single block is just the count == 1 case. Every operation
+ *  parallelises over the rows, never over the block count, so the launch
+ *  geometry is independent of how wide the panel is.
+ */
 template <class T, unsigned int bs>
 class PanelView {
 public:
-  /** @param launch Launch geometry for dot; @p scratch must hold at least
-   *  launch.num_groups * bs * bs entries. Both come from the owning
-   *  BlockMultivector, which derives them from the device. */
-  PanelView(sycl::queue* q_, T* start, std::size_t rows, unsigned int count, T* scratch, DotLaunch launch)
+  static constexpr unsigned int blocksize = bs;
+
+  /** @param launch Launch geometry for dot, derived from the device once by the
+   *  owning BlockMultivector and handed to every view. */
+  PanelView(sycl::queue* q_, T* start, std::size_t rows, unsigned int count, DotLaunch launch)
       : q(q_)
       , start_(start)
       , rows_(rows)
       , count_(count)
-      , scratch_(scratch)
       , launch_(launch)
   {
   }
 
-  // void set_zero() { q->memset(start_, 0, rows_ * count_ * bs * sizeof(T)); } //
+  /** @brief The single-block panel for block @p i of this panel. */
+  PanelView block(unsigned int i) const
+  {
+    TRL_CHECK(i < count_, "Block index out of range");
+    return {q, start_ + std::size_t(i) * rows_ * bs, rows_, 1, launch_};
+  }
 
   void copy_from(PanelView other)
   {
@@ -43,7 +54,7 @@ public:
    *  transpose factor itself is stored rather than computed. If @p events is
    *  given, the events of all submitted kernels are appended to it, as in dot.
    */
-  void mult(TransposeMode t, const DenseMatrix<T>& M, PanelView out, std::vector<sycl::event>* events = nullptr)
+  void mult(TransposeMode t, DenseMatrix<T> M, PanelView out, std::vector<sycl::event>* events = nullptr)
   {
     TRL_CHECK(rows() == out.rows(), "Input panel and output panel must have the same number of rows");
     if (t == TransposeMode::NoTranspose) {
@@ -64,7 +75,7 @@ public:
     const auto in_blocks = count_;
     const auto out_blocks = out.count_;
     const auto n = rows();
-    const auto ldb = M.cols(); // M is row-major, so its row stride is its column count
+    const auto ldb = M.ld();
 
     sycl::specialized<bool> tp = (t == TransposeMode::Transpose);
 
@@ -72,9 +83,15 @@ public:
       cgh.parallel_for(sycl::range<1>(n), [=](sycl::id<1> id) {
         auto tid = id[0];
 
-        for (unsigned int Bo = 0; Bo < out_blocks; ++Bo) {
-          T c_private[bs];
-          for (unsigned int i = 0; i < bs; ++i) c_private[i] = T{0};
+        // Output blocks are processed in tiles rather than one at a time, so
+        // the input panel is read ceil(out_blocks / tile) times instead of
+        // out_blocks times. That matters for the restart Ritz product, where
+        // the input panel is the whole basis.
+        for (unsigned int Bo0 = 0; Bo0 < out_blocks; Bo0 += tile) {
+          const unsigned int n_out = sycl::min(tile, out_blocks - Bo0);
+
+          T c_private[tile * bs];
+          for (unsigned int i = 0; i < tile * bs; ++i) c_private[i] = T{0};
 
           for (unsigned int Bi = 0; Bi < in_blocks; ++Bi) {
             const T* a_base = a + Bi * n * bs;
@@ -82,14 +99,17 @@ public:
             T a_private[bs];
             for (unsigned int j = 0; j < bs; ++j) a_private[j] = a_base[tid * bs + j];
 
-            for (unsigned int i = 0; i < bs; ++i)
-              for (unsigned int j = 0; j < bs; ++j)
-                if (tp) c_private[i] += a_private[j] * b[(Bo * bs + i) * ldb + (Bi * bs + j)];
-                else c_private[i] += a_private[j] * b[(Bi * bs + j) * ldb + (Bo * bs + i)];
+            for (unsigned int t_ = 0; t_ < n_out; ++t_)
+              for (unsigned int i = 0; i < bs; ++i)
+                for (unsigned int j = 0; j < bs; ++j)
+                  if (tp) c_private[t_ * bs + i] += a_private[j] * b[((Bo0 + t_) * bs + i) * ldb + (Bi * bs + j)];
+                  else c_private[t_ * bs + i] += a_private[j] * b[(Bi * bs + j) * ldb + ((Bo0 + t_) * bs + i)];
           }
 
-          T* c_base = c + Bo * n * bs;
-          for (unsigned int i = 0; i < bs; ++i) c_base[tid * bs + i] = c_private[i];
+          for (unsigned int t_ = 0; t_ < n_out; ++t_) {
+            T* c_base = c + (Bo0 + t_) * n * bs;
+            for (unsigned int i = 0; i < bs; ++i) c_base[tid * bs + i] = c_private[t_ * bs + i];
+          }
         }
       });
     });
@@ -116,33 +136,53 @@ public:
     });
   }
 
-  /** @brief Computes out = this^T * Y.
+  /** @brief Computes out = this^T * Y, with Y a single block.
+   *
+   *  @p out is (cols() x Y.cols()) and may be strided, so that the coefficients
+   *  can be written straight into a column of the projected matrix.
+   *
+   *  The parallelism comes from the rows: the grid is
+   *  (row tiles) x (blocks of this panel), so it stays thousands of work-groups
+   *  wide no matter how many blocks the panel holds, and each work item keeps
+   *  only bs*bs accumulators. Parallelising over the block count instead would
+   *  fill one or two wavefronts, serialise the reduction per lane, and make
+   *  adjacent lanes touch addresses n*sizeof(T) apart.
    */
-  void dot(PanelView Y, DenseMatrix<T>& out, std::vector<sycl::event>* events = nullptr)
+  void dot(PanelView Y, DenseMatrix<T> out, std::vector<sycl::event>* events = nullptr)
   {
-    TRL_CHECK(count_ == 1, "Only the single block panel case is implemented");
+    TRL_CHECK(rows() == Y.rows(), "Both panels must have the same number of rows");
+    TRL_CHECK(Y.count_ == 1, "The right operand of dot must be a single block");
+    TRL_CHECK(out.rows() == cols(), "The output must have one row per column of this panel");
+    TRL_CHECK(out.cols() == Y.cols(), "The output must have one column per column of the right operand");
+
+    sycl::event fill_event = out.fill_zero();
+    if (events) events->push_back(fill_event);
 
     const auto local_size = launch_.local_size;
     const auto global_size = launch_.global_size();
-    const bool interleaved = sycl::specialized(launch_.interleaved);
 
     const T* a = data();
     const T* b = Y.data();
     T* c = out.data();
-    // T* s = scratch_;
+    const auto ldc = out.ld();
     const auto n = rows();
 
-    sycl::event memset_event = q->memset(c, 0, sizeof(T) * bs * bs);
-    if (events) events->push_back(memset_event);
-
-    sycl::specialized<bool> is_interleaved(interleaved);
+    sycl::specialized<bool> is_interleaved(launch_.interleaved);
 
     sycl::event reduce_event = q->submit([&](sycl::handler& cgh) {
-      cgh.parallel_for(sycl::nd_range<1>(global_size, local_size), [=](sycl::nd_item<1> it) {
-        const std::size_t gid = it.get_global_linear_id();
-        const std::size_t gsize = it.get_global_range().size();
+      // Captured explicitly and widest-first: with an implicit [=] clang orders the
+      // closure by first use in the body, and any 4- or 1-byte capture sitting before
+      // a pointer leaves alignment padding that AdaptiveCpp emits as one kernel
+      // parameter per padding byte.
+      cgh.parallel_for(sycl::nd_range<2>(sycl::range<2>(global_size, count_), sycl::range<2>(local_size, 1)),
+                       [a, b, c, n, ldc, is_interleaved](sycl::nd_item<2> it) {
+        const std::size_t gid = it.get_global_id(0);
+        const std::size_t gsize = it.get_global_range(0);
+        const std::size_t B = it.get_global_id(1); // which block of the panel this group reduces
 
-        // The two loops differ only in how rows are distributed; since is_interlaved is
+        const T* a_block = a + B * n * bs;
+
+        // The two loops differ only in how rows are distributed; since is_interleaved is
         // of type sycl::specialized, AdaptiveCpp's JIT compiler will optimise the branch
         // away at JIT compile time.
         T sum[bs * bs] = {0};
@@ -151,7 +191,7 @@ public:
           // be coalesced)
           for (std::size_t i = gid; i < n; i += gsize)
             for (unsigned int I = 0; I < bs; ++I)
-              for (unsigned int J = 0; J < bs; ++J) sum[I * bs + J] += a[i * bs + I] * b[i * bs + J];
+              for (unsigned int J = 0; J < bs; ++J) sum[I * bs + J] += a_block[i * bs + I] * b[i * bs + J];
         }
         else {
           // CPU: individual work items take consecutive rows
@@ -160,7 +200,7 @@ public:
           const std::size_t end = sycl::min(begin + chunk, n);
           for (std::size_t i = begin; i < end; ++i)
             for (unsigned int I = 0; I < bs; ++I)
-              for (unsigned int J = 0; J < bs; ++J) sum[I * bs + J] += a[i * bs + I] * b[i * bs + J];
+              for (unsigned int J = 0; J < bs; ++J) sum[I * bs + J] += a_block[i * bs + I] * b[i * bs + J];
         }
 
         T reduced_sums[bs * bs];
@@ -170,11 +210,10 @@ public:
           reduced_sums[K] = sycl::reduce_over_group(it.get_group(), sum[K], sycl::plus<T>());
         }
 
-        // Write to scratch memory
         if (it.get_group().leader()) {
           for (unsigned int I = 0; I < bs; ++I)
             for (unsigned int J = 0; J < bs; ++J) {
-              sycl::atomic_ref<double, sycl::memory_order::relaxed, sycl::memory_scope::device> c_ref(c[I * bs + J]);
+              sycl::atomic_ref<T, sycl::memory_order::relaxed, sycl::memory_scope::device> c_ref(c[(B * bs + I) * ldc + J]);
               c_ref += reduced_sums[I * bs + J];
             }
         }
@@ -194,7 +233,7 @@ public:
    *  cost: each row of this is read and written exactly once. If @p events is
    *  given, the event of the submitted kernel is appended to it, as in mult.
    */
-  void subtract_product(TransposeMode t, PanelView Y, DenseMatrix<T>& M, std::vector<sycl::event>* events = nullptr)
+  void subtract_product(TransposeMode t, PanelView Y, DenseMatrix<T> M, std::vector<sycl::event>* events = nullptr)
   {
     TRL_CHECK(rows() == Y.rows(), "This panel and the input panel must have the same number of rows");
     if (t == TransposeMode::NoTranspose) {
@@ -212,7 +251,7 @@ public:
     const auto in_blocks = Y.count_;
     const auto out_blocks = count_;
     const auto n = rows();
-    const auto ldb = M.cols(); // M is row-major, so its row stride is its column count
+    const auto ldb = M.ld();
 
     sycl::specialized<bool> tp = (t == TransposeMode::Transpose);
 
@@ -244,19 +283,22 @@ public:
     if (events) events->push_back(subtract_event);
   }
 
-  T* data() { return start_; }
+  T* data() const { return start_; }
 
   std::size_t rows() const { return rows_; }
-  std::size_t cols() const { return count_ * bs; }
+  std::size_t cols() const { return std::size_t(count_) * bs; }
+  unsigned int blocks() const { return count_; }
 
 private:
+  /** @brief Output blocks held in registers at once by mult, kept at
+   *  tile * bs accumulators regardless of the block size. */
+  static constexpr unsigned int tile = bs >= 8 ? 1u : (bs >= 4 ? 2u : 8u);
+
   sycl::queue* q;
 
   T* start_;
   std::size_t rows_;
   unsigned int count_;
-
-  T* scratch_;
 
   DotLaunch launch_;
 };

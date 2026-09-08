@@ -106,7 +106,7 @@ int main(int argc, char** argv)
 
   BlockMultivector<Scalar, blocksize> V(q, n, ncv);
   BlockMultivector<Scalar, blocksize> W(q, n, nev);
-  DenseMatrix<Scalar> M(q, ncv, nev);
+  OwnedDenseMatrix<Scalar> M(q, ncv, nev);
 
   Backend<Scalar, blocksize> backend(q);
 
@@ -181,7 +181,7 @@ int main(int argc, char** argv)
   // mathematical product V * M -- and hence the reference -- is the same as
   // above, which is exactly what makes the two kernel paths comparable.
   RowMajorMatrix<Scalar> Mtm = Mm.transpose();
-  DenseMatrix<Scalar> Mt(q, nev, ncv);
+  OwnedDenseMatrix<Scalar> Mt(q, nev, ncv);
   {
     auto host = backend.host_block(Mt, trl::Access::Write);
     std::copy_n(Mtm.data(), static_cast<std::size_t>(Mtm.size()), host.data());

@@ -8,28 +8,49 @@
 #include <Eigen/Core>
 #include <Eigen/Dense>
 #include <algorithm>
+#include <array>
 #include <cassert>
 #include <cmath>
+#include <limits>
 #include <memory>
 #include <numeric>
+#include <stdexcept>
+#include <vector>
 
 namespace trl {
 /** @brief Block Lanczos eigensolver with thick restart.
  *
  *  Computes a subset of eigenvalues and eigenvectors of the eigenproblem
- *  defined by @p EVP using a restarted block Krylov iteration.
+ *  defined by @p O using a restarted block Lanczos iteration with full
+ *  reorthogonalization.
  *
- *  @tparam EVP  Eigenproblem type satisfying the \ref trl::Eigenproblem concept.
- *  @tparam Reorth  Reorthogonalization strategy. Must satisfy
- *          \ref trl::ReorthogonalizationStrategy. Defaults to \ref trl::ModifiedGS.
+ *  In fact, we're actually doing an Arnoldi iteration here, i.e. we never
+ *  rely on symmetry of the problem and the Lanczos three-term recurrence
+ *  (at least not in the Krylov basis extension part of the algorithm; the
+ *  small projected eigenproblem does assume symmetry for now).
+ *
+ *  One step of the algorithm is roughly:
+ *  - apply the operator,
+ *  - project the result against the whole basis
+ *  - orthonormalise using full reorthogonalisation
+ *
+ *
+ *  @tparam B  Backend type satisfying \ref trl::BackendConcept.
+ *  @tparam O  Operator type satisfying \ref trl::OperatorConcept.
+ *  @tparam Reorth  Reorthogonalization strategy, defaulting to
+ *          \ref trl::ClassicalGS2. It must leave the total projection in the
+ *          coefficient view it is handed, since that view is a column of T.
  */
-template <BackendConcept B, OperatorConcept<B> O, class Reorth = ModifiedGS>
-// requires ReorthogonalizationStrategy<Reorth, EVP, typename EVP::BlockMultivector>
+template <BackendConcept B, OperatorConcept<B> O, class Reorth = ClassicalGS2>
 class BlockLanczos {
 public:
   using BMV = typename B::Multivector;
   using Scalar = typename B::Scalar;
+  using DenseMatrix = typename B::DenseMatrix;
+  using Panel = typename BMV::PanelView;
   static constexpr unsigned int blocksize = B::blocksize;
+
+  static_assert(ReorthogonalizationStrategy<Reorth, O, B, Panel, DenseMatrix>, "The reorthogonalization strategy must be callable as (op, backend, panel, block, coefficients, scratch)");
 
   BlockLanczos(B backend_, std::shared_ptr<O> op_, const EigensolverParams& params)
       : nev(params.nev)
@@ -38,15 +59,19 @@ public:
       , tolerance(params.tolerance)
       , V(backend_.make_multivector(op_->size(), ncv + blocksize))
       , W(backend_.make_multivector(op_->size(), ncv + blocksize))
-      , // Allocate W with ncv columns to match matrix dimensions
-      T(backend_.make_blockmatrix(ncv / blocksize, ncv / blocksize))
-      , U(backend_.make_blockmatrix(1, 2))
-      , Y(backend_.make_blockmatrix(ncv / blocksize, ncv / blocksize))
-      , YY(backend_.make_dense_matrix(ncv, nev))
+      , T_(backend_.make_dense_matrix(ncv, ncv))
+      , YY_(backend_.make_dense_matrix(ncv, nev))
+      , H2_(backend_.make_dense_matrix(ncv + blocksize, blocksize))
+      , gram_(backend_.make_dense_matrix(blocksize, blocksize))
+      , beta_inv_(backend_.make_dense_matrix(blocksize, blocksize))
+      // beta and the Cholesky status share one allocation so that the restart
+      // reads both with a single transfer.
+      , bstat_(backend_.make_dense_matrix(blocksize + 1, blocksize))
       , op(std::move(op_))
       , backend(std::move(backend_))
   {
     if (nev % blocksize != 0) throw std::invalid_argument("nev (" + std::to_string(nev) + ") must be a multiple of blocksize (" + std::to_string(blocksize) + ").");
+    if (ncv % blocksize != 0) throw std::invalid_argument("ncv (" + std::to_string(ncv) + ") must be a multiple of blocksize (" + std::to_string(blocksize) + ").");
 
     // Validate that we won't exhaust the Krylov subspace
     // The maximum number of orthogonal vectors is op->size()
@@ -67,8 +92,7 @@ public:
     }
   }
 
-  /** @brief Solves the eigenvalue problem using thick-restart Lanczos
-   */
+  /** @brief Solves the eigenvalue problem using thick-restart Lanczos */
   EigensolverResult<Scalar> solve()
   {
     EigensolverResult<Scalar> result{
@@ -77,108 +101,37 @@ public:
         .n_op_apply = 0,
         .eigenvalues = {},
     };
-    unsigned int k = 0;
 
-    auto beta = U.block_view(0, 0);
+    const unsigned int m = ncv / blocksize;
+    const unsigned int k_restart = nev / blocksize;
+    unsigned int k = 0;
 
     while (result.iterations < max_restarts) {
       result.iterations++;
 
-      // Extend the basis up to the ncv budget: a full build when k == 0, a continuation after restart otherwise.
-      result.n_op_apply += extend(k, ncv / blocksize);
+      // Extend the basis up to the ncv size (for k=0 this is the initial full build of the basis,
+      // when k != 0, this extends the basis again to the full size after a thick restart.
+      result.n_op_apply += extend(k, m);
 
-      // Solve the small projected system
-      auto converged = solve_small_dense(beta);
+      // Solve the small projected system. When it does not converge this also
+      // rebuilds T and the Ritz coefficients for the restart below.
+      const auto converged = solve_small_dense();
       if (converged >= nev) {
         result.converged = true;
         result.eigenvalues = std::move(eigenvalues);
         return result;
       }
 
-      // We did not converge yet, so now we must prepare for restart. We begin by computing
-      // the Ritz vectors that we will keep.
-      auto k_restart = nev / blocksize;
-      assert(k_restart < ncv / blocksize);
-
-      // W(:, 0:nev - 1) = V(:, 0:ncv - 1) * Y(:, 0:nev - 1), with the kept
-      // eigenvector columns of Y packed into the dense row-major YY by
-      // solve_small_dense.
-      auto Vp = V.panel_view(0, ncv / blocksize); // columns 0 .. ncv-1
-      auto Wp = W.panel_view(0, k_restart);       // columns 0 .. nev-1
-
-      Vp.mult(TransposeMode::NoTranspose, YY, Wp);
-      // Copy V_{m+1} to V_{k+1}
-      W.block_view(k_restart).copy_from(V.block_view(ncv / blocksize));
-
+      // Thick restart: keep the nev Ritz vectors and the trailing residual
+      // block. W(:, 0:nev) = V(:, 0:ncv) * YY, one panel product.
+      V.panel_view(0, m).mult(TransposeMode::NoTranspose, YY_, W.panel_view(0, k_restart));
+      W.panel_view(k_restart, 1).copy_from(V.panel_view(m, 1));
       std::swap(V, W);
 
-      // Put the first nev Ritz values on the diagonal of T
-      for (std::size_t i = 0; i < k_restart; ++i) {
-        for (std::size_t j = 0; j < k_restart; ++j) {
-          auto Tij = T.block_view(i, j);
-          Tij.set_zero();
-
-          if (i == j) {
-            const auto& evals = get_eigenvalues_block(i);
-            Tij.set_diagonal(evals);
-          }
-        }
-      }
-      // Put the "residual block" into T
-      for (std::size_t i = 0; i < k_restart; ++i) {
-        auto Tki = T.block_view(k_restart, i);
-        auto Tik = T.block_view(i, k_restart);
-        auto Xrow = Y.block_view(ncv / blocksize - 1, i); // use last row of Y from current projected problem
-
-        beta.mult(Xrow, Tki);
-        Tik.copy_from_transpose(Tki);
-      }
-
-      // Now the Lanczos three-term relation is violated, so we do one manual
-      // (quasi)-Lanczos step to restore it again. After that, we can proceed
-      // using the standard Lanczos algorithm (i.e. call the extend method)
+      // T restarts as the kept Ritz values on the diagonal, written by
+      // prepare_restart. The "arrowhead" that couples them to the residual block
+      // is column k_restart of T, which is computed by the extend method above.
       k = k_restart;
-
-      // Apply the operator
-      auto Vk = V.block_view(k);
-      auto Vk1 = V.block_view(k + 1);
-      op->apply(Vk, Vk1);
-      result.n_op_apply++;
-
-      // Compute the next diagonal block
-      auto Tkk = T.block_view(k, k);
-      auto Tkkd = typename B::DenseMatrix(Tkk.data(), blocksize, blocksize);
-      op->dot(Vk, Vk1, Tkkd);
-
-      auto Z0 = U.block_view(0, 1); // temp storage
-      Vk1.subtract_product(TransposeMode::NoTranspose, Vk, Tkkd);
-
-      // Vk1 couples to every retained Ritz block here, not just Vk-1, so skip straight
-      // to full reorthogonalization instead of a single-neighbor subtraction.
-      auto Z0_dense = typename B::DenseMatrix(Z0.data(), blocksize, blocksize);
-      reorthogonalize_against(Vk1, k + 1, Z0_dense);
-
-      // Step 6: Orthonormalize V_{i+1} to get beta_i (Cholesky factor) and V_{i+1}
-      orthonormalize(Vk1, beta);
-
-      // Store beta in the block tridiagonal matrix T
-      // beta is upper triangular Cholesky factor: V_old = V_new * beta
-      // T should be symmetric, so T[i+1,i] = beta and T[i,i+1] = beta^T
-      if (k + 1 < T.block_rows()) {
-        auto Ti1_i = T.block_view(k + 1, k);
-        Ti1_i.copy_from(beta);
-
-        auto Ti_i1 = T.block_view(k, k + 1);
-        Ti_i1.copy_from_transpose(beta);
-
-        k += 1;
-      }
-      else {
-        TRL_TODO("Should this ever happen?");
-        // We've exhausted the Krylov subspace (k+1 == ncv/blocksize)
-        // We cannot extend further, so let's just return.
-        break;
-      }
     }
 
     // Report the best Ritz values we have even when we ran out of restarts, so
@@ -197,7 +150,7 @@ public:
    *
    *  @note The parameters k and m are counted in blocks.
    *
-   *  @returns The number of operator applications (i.e. the number of calls to backend.apply)
+   *  @returns The number of operator applications (i.e. the number of calls to op->apply)
    */
   unsigned int extend(unsigned int k, unsigned int m)
   {
@@ -206,56 +159,30 @@ public:
 
     unsigned int n_op_apply = 0;
 
-    auto beta = U.block_view(0, 0);
-    auto Z0 = U.block_view(0, 1); // temp storage
+    // Cleared once per sweep and read back at the next restart, so that a
+    // failed factorisation costs no synchronisation until it is reported.
+    status_view().fill_zero();
 
-    // Orthonormalize the initial block if starting from k=0
-    if (k == 0) {
-      auto V0 = V.block_view(0);
-      orthonormalize(V0, Z0); // Use Z0 as temp storage for R matrix
-    }
+    if (k == 0) orthonormalize(V.panel_view(0, 1));
 
     for (unsigned int i = k; i < m; ++i) {
-      auto V_curr = V.block_view(i);
-      auto V_next = V.block_view(i + 1);
+      auto Vp = V.panel_view(0, i + 1);
+      auto w = V.panel_view(i + 1, 1);
 
-      // Step 1: v_{i+1} = A v_i
-      op->apply(V_curr, V_next);
+      op->apply(V.panel_view(i, 1), w);
       n_op_apply++;
 
-      // Step 2: v_{i+1} -= v_{i-1} * beta_{i-1}^T
-      auto beta_dense = typename B::DenseMatrix(beta.data(), blocksize, blocksize);
-      if (i > 0) {
-        auto V_prev = V.block_view(i - 1);
-        V_next.subtract_product(TransposeMode::Transpose, V_prev, beta_dense);
-      }
+      // h is column block i of T: the projection coefficients the
+      // orthogonalization needs are exactly that column of V^T A V.
+      auto h = T_.view().block(0, i * blocksize, (i + 1) * blocksize, blocksize);
+      reorth_(*op, backend, Vp, w, h, H2_.view().block(0, 0, (i + 1) * blocksize, blocksize));
 
-      // step 3: Compute T(i,i) = <v_i, v_{i+1}>
-      auto Tii = T.block_view(i, i);
-      auto Tii_dense = typename B::DenseMatrix(Tii.data(), blocksize, blocksize);
-      op->dot(V_curr, V_next, Tii_dense);
+      // Here we set T(i-1, i) = beta_{i-1}^T, where beta comes from the previous step's Cholesky
+      // factorisation. This is more accurate than using the recomputed value that's currently
+      // in T (TODO: Reference).
+      if (i > k) T_.view().block((i - 1) * blocksize, i * blocksize, blocksize, blocksize).copy_from_transpose(beta());
 
-      // Step 4: Orthogonalise v_{i+1} -= v_i * T(i,i)
-      V_next.subtract_product(TransposeMode::NoTranspose, V_curr, Tii_dense);
-
-      // Step 5: Full reorthogonalization
-      auto Z0_dense = typename B::DenseMatrix(Z0.data(), blocksize, blocksize);
-      reorthogonalize_against(V_next, i + 1, Z0_dense);
-
-      // Step 6: Orthonormalize V_{i+1} to get beta_i (Cholesky factor) and V_{i+1}
-      orthonormalize(V_next, beta);
-
-      // Store beta in the block tridiagonal matrix T
-      // beta is upper triangular Cholesky factor: V_old = V_new * beta
-      // The Lanczos relation is: A*V_i = ... + V_{i+1} * beta_i
-      // So T[i+1,i] = beta and T[i,i+1] = beta^T for symmetry
-      if (i + 1 < T.block_rows()) {
-        auto Ti1_i = T.block_view(i + 1, i);
-        Ti1_i.copy_from(beta);
-
-        auto Ti_i1 = T.block_view(i, i + 1);
-        Ti_i1.copy_from_transpose(beta);
-      }
+      orthonormalize(w);
     }
 
     return n_op_apply;
@@ -264,143 +191,108 @@ public:
   /** @brief Return the current Lanczos vectors */
   auto& get_basis() { return V; }
 
-  /** @brief Return the block tridiagonal matrix T */
-  auto& get_T() { return T; }
+  /** @brief Return the projected matrix V^T A V (upper triangle valid) */
+  DenseMatrix get_T() { return T_.view(); }
 
-  /** @brief Return the B matrix containing beta values */
-  auto& get_beta() { return U; }
+  /** @brief Return the Cholesky factor of the most recent block */
+  DenseMatrix get_beta() { return beta(); }
 
 private:
-  unsigned int solve_small_dense(typename B::BlockMatrix::BlockView beta)
+  /** @brief Orthonormalizes @p v in place, leaving the Cholesky factor in beta.
+   *
+   *  v_new = v * R^{-1} where R^T R = v^T v, so v_old = v_new * R.
+   */
+  void orthonormalize(Panel v)
   {
-    const auto n_total = T.block_rows() * blocksize;
+    op->dot(v, v, gram_);
+    gram_.view().cholesky_inverse(beta(), beta_inv_, status_ptr());
+    v.mult(TransposeMode::NoTranspose, beta_inv_, v);
+  }
 
-    // Convert block matrix to dense Eigen matrix
-    Eigen::Matrix<Scalar, Eigen::Dynamic, Eigen::Dynamic> B_dense(n_total, n_total);
+  /** @brief Rayleigh-Ritz on the projected matrix; returns the converged count.
+   *
+   *  This moves T to the host and solves the small eigenproblem there.
+   */
+  unsigned int solve_small_dense()
+  {
+    using Matrix = Eigen::Matrix<Scalar, Eigen::Dynamic, Eigen::Dynamic, Eigen::ColMajor>;
+    const std::size_t n_total = ncv;
 
+    // Step i wrote rows 0..i of column i, so the device buffer is row-major
+    // with only the upper triangle valid. Read column-major it is the
+    // transpose, whose lower triangle is those same entries -- and the lower
+    // triangle is the only part SelfAdjointEigenSolver references. So no
+    // mirroring and no copy: the untouched half of the buffer lands in the half
+    // that is never read.
+    Eigen::SelfAdjointEigenSolver<Matrix> solver;
     {
-      auto T_host = backend.host_block(T, Access::Read);
-      for (std::size_t i = 0; i < T.block_rows(); ++i) {
-        for (std::size_t j = 0; j < T.block_cols(); ++j) {
-          auto* T_host_block = T_host.data() + (i * T.block_cols() + j) * blocksize * blocksize;
-          for (unsigned int bi = 0; bi < blocksize; ++bi)
-            for (unsigned int bj = 0; bj < blocksize; ++bj) B_dense(i * blocksize + bi, j * blocksize + bj) = T_host_block[bi * blocksize + bj];
-        }
-      }
+      auto T_host = backend.host_block(T_, Access::Read);
+      solver.compute(Eigen::Map<const Matrix>(T_host.data(), n_total, n_total));
     }
-
-    // Compute eigendecomposition
-    Eigen::SelfAdjointEigenSolver<Eigen::Matrix<Scalar, Eigen::Dynamic, Eigen::Dynamic>> solver(B_dense);
     if (solver.info() != Eigen::Success) throw std::runtime_error("Eigendecomposition failed");
 
-    // Store eigenvalues in descending order (largest first)
-    // Eigen returns them in ascending order, so reverse
+    // Reorder the eigenvalues in descending order (in terms of absolute value)
     std::vector<unsigned int> indices(n_total);
     std::iota(indices.begin(), indices.end(), 0);
-
     std::sort(indices.begin(), indices.end(), [&](const auto& i, const auto& j) { return std::abs(solver.eigenvalues()[i]) > std::abs(solver.eigenvalues()[j]); });
 
     eigenvalues.resize(n_total);
     for (std::size_t i = 0; i < n_total; ++i) eigenvalues[i] = solver.eigenvalues()(indices[i]);
 
-    // Store eigenvectors in BlockMatrix format (also reversed to match eigenvalues),
-    // and mirror the first nev columns into the dense row-major YY that the
-    // restart's panel product consumes.
+    // Move the Cholesky factor beta to the host (it is needed to estimate the residuals below)
+    std::array<Scalar, blocksize * blocksize> beta_host{};
     {
-      auto Y_host = backend.host_block(Y, Access::Write);
-      auto YY_host = backend.host_block(YY, Access::Write);
-      for (std::size_t i = 0; i < Y.block_rows(); ++i) {
-        for (std::size_t j = 0; j < Y.block_cols(); ++j) {
-          auto* Y_host_block = Y_host.data() + (i * Y.block_cols() + j) * blocksize * blocksize;
-          for (unsigned int bi = 0; bi < blocksize; ++bi) {
-            for (unsigned int bj = 0; bj < blocksize; ++bj) {
-              // Reverse column order to match descending eigenvalue order
-              const Scalar value = solver.eigenvectors()(i * blocksize + bi, indices[j * blocksize + bj]);
-              Y_host_block[bi * blocksize + bj] = value;
-
-              // Pack column j * blocksize + bj of the eigenvector matrix into
-              // row-major YY (ncv x nev). Only the first nev columns are kept
-              // across the restart; the rest of Y is not needed densely.
-              if (j * blocksize + bj < nev) YY_host.data()[(i * blocksize + bi) * nev + (j * blocksize + bj)] = value;
-            }
-          }
-        }
-      }
+      auto bstat_host = backend.host_block(bstat_, Access::Read);
+      if (bstat_host[blocksize * blocksize] != Scalar{0}) throw std::runtime_error("Cholesky factorization failed in orthonormalize");
+      std::copy_n(bstat_host.data(), blocksize * blocksize, beta_host.begin());
     }
 
-    // Compute residual norms and count converged eigenvalues
-    // Residual norm: ||beta * v_j||_2 where v_j are the last blocksize components of eigenvector j
+    // Residual norm of Ritz pair j is ||beta * y_j||, over the last blocksize components of the eigenvector
     std::size_t n_converged = 0;
-    const std::size_t last_block_row = Y.block_rows() - 1;
     const Scalar eps = std::numeric_limits<Scalar>::epsilon();
-
-    auto beta_host = backend.host_block(beta, Access::Read);
     const std::size_t n_check = std::min<std::size_t>(nev, n_total);
-    for (std::size_t col_idx = 0; col_idx < n_check; ++col_idx) {
-      const std::size_t block_col = col_idx / blocksize;
-      const std::size_t col_in_block = col_idx % blocksize;
 
-      auto v_last = Y.block_view(last_block_row, block_col);
-      auto v_last_host = backend.host_block(v_last, Access::Read);
-
-      // Compute beta * v_j (where v_j is a column vector of size blocksize)
-      Scalar norm_sq = 0.0;
+    for (std::size_t col = 0; col < n_check; ++col) {
+      Scalar norm_sq = 0;
       for (unsigned int i = 0; i < blocksize; ++i) {
-        Scalar sum = 0.0;
-        for (unsigned int k = 0; k < blocksize; ++k) sum += beta_host[i * blocksize + k] * v_last_host[k * blocksize + col_in_block];
+        Scalar sum = 0;
+        for (unsigned int j = 0; j < blocksize; ++j) sum += beta_host[i * blocksize + j] * solver.eigenvectors()(n_total - blocksize + j, indices[col]);
         norm_sq += sum * sum;
       }
 
-      Scalar residual_norm = std::sqrt(norm_sq);
-      const Scalar theta = eigenvalues[col_idx];
-      const Scalar denom = std::max(std::abs(theta), eps);
-      const Scalar rel_residual = residual_norm / denom;
-
-      if (rel_residual < tolerance) n_converged++;
+      const Scalar denom = std::max(std::abs(eigenvalues[col]), eps);
+      if (std::sqrt(norm_sq) / denom < tolerance) n_converged++;
     }
+
+    if (n_converged < nev) prepare_restart(solver.eigenvectors(), indices);
 
     return n_converged;
   }
 
-  std::span<Scalar, blocksize> get_eigenvalues_block(unsigned int block)
+  /** @brief Writes the restarted T */
+  template <class Eigenvectors>
+  void prepare_restart(const Eigenvectors& evecs, const std::vector<unsigned int>& indices)
   {
-    std::span<Scalar, blocksize> ev_block(eigenvalues.data() + block * blocksize, blocksize);
-    return ev_block;
+    const std::size_t n_total = ncv;
+
+    // Here we only put the Ritz values on the diagonal of T; the rest of the "arrowhead"
+    // structure is put into T in extend(), see the commend in solve()
+    {
+      auto T_host = backend.host_block(T_, Access::Write);
+      std::fill_n(T_host.data(), n_total * n_total, Scalar{0});
+      for (std::size_t j = 0; j < nev; ++j) T_host[j * n_total + j] = eigenvalues[j];
+    }
+
+    {
+      auto YY_host = backend.host_block(YY_, Access::Write);
+      for (std::size_t r = 0; r < n_total; ++r)
+        for (std::size_t c = 0; c < nev; ++c) YY_host[r * nev + c] = evecs(r, indices[c]);
+    }
   }
 
-  void orthonormalize(typename BMV::BlockView V_next, typename B::BlockMatrix::BlockView beta)
-  {
-    // 1. Compute Gram matrix G = V^T * V (stored in R).
-    // Use the operator's inner product (which is the B-inner product for
-    // generalized problems), not the Euclidean dot of the view.
-    auto beta_dense = typename B::DenseMatrix(beta.data(), blocksize, blocksize);
-    op->dot(V_next, V_next, beta_dense);
-
-    // 2. Compute Cholesky factorization of G = U^T * U
-    //
-    // The host mirror only reaches the device when it is destroyed, so each
-    // scope below ends where the device-side value of beta has to be current.
-    Eigen::Matrix<Scalar, blocksize, blocksize> stored_R;
-    {
-      auto beta_host = backend.host_block(beta, Access::ReadWrite);
-      Eigen::Map<Eigen::Matrix<Scalar, blocksize, blocksize, Eigen::RowMajor>> RR(beta_host.data());
-      Eigen::LLT<Eigen::Matrix<Scalar, blocksize, blocksize>> llt(RR);
-      if (llt.info() != Eigen::Success) throw std::runtime_error("Cholesky factorization failed in orthonormalize");
-      RR = llt.matrixL().transpose();
-      stored_R = RR;
-
-      // 3. Compute U^{-1} and store in R temporarily
-      RR = stored_R.inverse().eval();
-    } // flush: beta holds U^{-1} on the device
-
-    V_next.mult(TransposeMode::NoTranspose, beta_dense, V_next); // V_next *= U^{-1}
-
-    // 4. Restore U in R (the Cholesky factor, not its inverse)
-    {
-      auto beta_host = backend.host_block(beta, Access::Write);
-      Eigen::Map<Eigen::Matrix<Scalar, blocksize, blocksize, Eigen::RowMajor>>(beta_host.data()) = stored_R;
-    } // flush: beta holds U on the device
-  }
+  DenseMatrix beta() { return bstat_.view().block(0, 0, blocksize, blocksize); }
+  DenseMatrix status_view() { return bstat_.view().block(blocksize, 0, 1, blocksize); }
+  Scalar* status_ptr() { return bstat_.data() + blocksize * blocksize; }
 
   // Parameters
   unsigned int nev;
@@ -410,18 +302,18 @@ private:
 
   std::vector<Scalar> eigenvalues;
 
-  // Vectors and matrices
+  // Basis, and the restart target for the Ritz vectors
   BMV V;
-  BMV W; // Temp vector
+  BMV W;
 
-  typename B::BlockMatrix T; // Block tridiagonal matrix
-  typename B::BlockMatrix U; // Temp matrix
-  typename B::BlockMatrix Y; // Eigenvectors of small problem
-  typename B::DenseMatrix YY;
+  typename B::OwnedDenseMatrix T_;        // ncv x ncv, the projected matrix V^T A V
+  typename B::OwnedDenseMatrix YY_;       // ncv x nev, the kept Ritz coefficients
+  typename B::OwnedDenseMatrix H2_;       // scratch space for the orthogonalization routine (so we don't have to allocate there)
+  typename B::OwnedDenseMatrix gram_;     // blocksize x blocksize
+  typename B::OwnedDenseMatrix beta_inv_; // blocksize x blocksize
+  typename B::OwnedDenseMatrix bstat_;    // beta, with the Cholesky status in the trailing row
 
   Reorth reorth_{};
-
-  void reorthogonalize_against(typename BMV::BlockView V_next, unsigned int count, typename B::DenseMatrix tmp) { reorth_(*op, V, count, V_next, tmp); }
 
   std::shared_ptr<O> op;
   [[no_unique_address]] B backend;
