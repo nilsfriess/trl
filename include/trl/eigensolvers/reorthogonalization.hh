@@ -1,6 +1,6 @@
 #pragma once
 
-#include <concepts>
+#include "trl/concepts.hh"
 
 namespace trl {
 
@@ -16,7 +16,7 @@ struct ModifiedGS {
     for (unsigned int j = 0; j < count; ++j) {
       auto Vj = V.block_view(j);
       op.dot(Vj, V_next, tmp);
-      V_next.subtract_product(Vj, tmp);
+      V_next.subtract_product(TransposeMode::NoTranspose, Vj, tmp);
     }
   }
 };

@@ -100,24 +100,13 @@ public:
       auto k_restart = nev / blocksize;
       assert(k_restart < ncv / blocksize);
 
-      // W(:, 0:k_restart) = V(:, 0:ncv - 1) * Y(0:ncv - 1, 0:k_restart)
-#if 1
-      auto Vp = V.panel_view(0, ncv - 1);
-      auto Wp = V.panel_view(0, k_restart - 1);
+      // W(:, 0:nev - 1) = V(:, 0:ncv - 1) * Y(:, 0:nev - 1), with the kept
+      // eigenvector columns of Y packed into the dense row-major YY by
+      // solve_small_dense.
+      auto Vp = V.panel_view(0, ncv / blocksize); // columns 0 .. ncv-1
+      auto Wp = W.panel_view(0, k_restart);       // columns 0 .. nev-1
 
-      Vp.mult(TransposeMode::NoTranspose, YY, Wp); // W(:, 0:k_restart) = V(:, 0:ncv - 1) * Y(0:ncv - 1, 0:k_restart)
-#else
-      for (std::size_t j = 0; j < k_restart; ++j) {
-        auto Wj = W.block_view(j);
-        Wj.set_zero();
-        // W(j) = V(0) * Y(0, j) + V(1) * Y(1, j) + ... + V(ncv - 1) * Y(ncv - 1, j)
-        for (std::size_t i = 0; i < ncv / blocksize; ++i) { // W(j) += V(i) * Y(i, j)
-          auto Vi = V.block_view(i);
-          auto Yij = Y.block_view(i, j);
-          Vi.mult_add(Yij, Wj);
-        }
-      }
-#endif
+      Vp.mult(TransposeMode::NoTranspose, YY, Wp);
       // Copy V_{m+1} to V_{k+1}
       W.block_view(k_restart).copy_from(V.block_view(ncv / blocksize));
 
@@ -163,8 +152,7 @@ public:
 
       auto W0 = W.block_view(0);    // temp storage
       auto Z0 = U.block_view(0, 1); // temp storage
-      Vk.mult(TransposeMode::NoTranspose, Tkkd, W0);
-      Vk1.subtract(W0);
+      Vk1.subtract_product(TransposeMode::NoTranspose, Vk, Tkkd);
 
       // Vk1 couples to every retained Ritz block here, not just Vk-1, so skip straight
       // to full reorthogonalization instead of a single-neighbor subtraction.
@@ -241,18 +229,18 @@ public:
       auto beta_dense = typename B::DenseMatrix(beta.data(), blocksize, blocksize);
       if (i > 0) {
         auto V_prev = V.block_view(i - 1);
-        V_prev.mult(TransposeMode::Transpose, beta_dense, W0);
-        V_next.subtract(W0);
+        V_next.subtract_product(TransposeMode::Transpose, V_prev, beta_dense);
       }
 
-      // Step 3: Compute T(i,i) = <v_i, v_{i+1}>
+      // step 3: Compute T(i,i) = <v_i, v_{i+1}>
       auto Tii = T.block_view(i, i);
       auto Tii_dense = typename B::DenseMatrix(Tii.data(), blocksize, blocksize);
       op->dot(V_curr, V_next, Tii_dense);
 
       // Step 4: Orthogonalise v_{i+1} -= v_i * T(i,i)
-      V_curr.mult(TransposeMode::NoTranspose, Tii_dense, W0);
-      V_next.subtract(W0);
+      V_next.subtract_product(TransposeMode::NoTranspose, V_curr, Tii_dense);
+      // V_curr.mult(TransposeMode::NoTranspose, Tii_dense, W0);
+      // V_next.subtract(W0);
 
       // Step 5: Full reorthogonalization
       auto Z0_dense = typename B::DenseMatrix(Z0.data(), blocksize, blocksize);
@@ -319,16 +307,25 @@ private:
     eigenvalues.resize(n_total);
     for (std::size_t i = 0; i < n_total; ++i) eigenvalues[i] = solver.eigenvalues()(indices[i]);
 
-    // Store eigenvectors in BlockMatrix format (also reversed to match eigenvalues)
+    // Store eigenvectors in BlockMatrix format (also reversed to match eigenvalues),
+    // and mirror the first nev columns into the dense row-major YY that the
+    // restart's panel product consumes.
     {
       auto Y_host = backend.host_block(Y, Access::Write);
+      auto YY_host = backend.host_block(YY, Access::Write);
       for (std::size_t i = 0; i < Y.block_rows(); ++i) {
         for (std::size_t j = 0; j < Y.block_cols(); ++j) {
           auto* Y_host_block = Y_host.data() + (i * Y.block_cols() + j) * blocksize * blocksize;
           for (unsigned int bi = 0; bi < blocksize; ++bi) {
             for (unsigned int bj = 0; bj < blocksize; ++bj) {
               // Reverse column order to match descending eigenvalue order
-              Y_host_block[bi * blocksize + bj] = solver.eigenvectors()(i * blocksize + bi, indices[j * blocksize + bj]);
+              const Scalar value = solver.eigenvectors()(i * blocksize + bi, indices[j * blocksize + bj]);
+              Y_host_block[bi * blocksize + bj] = value;
+
+              // Pack column j * blocksize + bj of the eigenvector matrix into
+              // row-major YY (ncv x nev). Only the first nev columns are kept
+              // across the restart; the rest of Y is not needed densely.
+              if (j * blocksize + bj < nev) YY_host.data()[(i * blocksize + bi) * nev + (j * blocksize + bj)] = value;
             }
           }
         }
@@ -401,8 +398,8 @@ private:
     } // flush: beta holds U^{-1} on the device
 
     auto Vtemp0 = W.block_view(0);
-    V_next.mult(TransposeMode::NoTranspose, beta_dense, Vtemp0); // V_temp = V * U^{-1}
-    V_next.copy_from(Vtemp0);
+    V_next.mult(TransposeMode::NoTranspose, beta_dense, V_next); // V_temp = V * U^{-1}
+    // V_next.copy_from(Vtemp0);
 
     // 4. Restore U in R (the Cholesky factor, not its inverse)
     {

@@ -29,7 +29,12 @@ public:
 
   // void set_zero() { q->memset(start_, 0, rows_ * count_ * bs * sizeof(T)); } //
 
-  void copy_from(PanelView other) { TRL_TODO("PanelView::copy_from"); }
+  void copy_from(PanelView other)
+  {
+    TRL_CHECK(rows() == other.rows(), "The number of rows of panels must match to copy them");
+    TRL_CHECK(cols() == other.cols(), "The number of rows of panels must match to copy them");
+    q->memcpy(data(), other.data(), rows() * cols() * sizeof(T));
+  }
 
   /** @brief Computes out = this * M (or this * M^T for TransposeMode::Transpose).
    *
@@ -130,26 +135,26 @@ public:
     sycl::event memset_event = q->memset(c, 0, sizeof(T) * bs * bs);
     if (events) events->push_back(memset_event);
 
+    sycl::specialized<bool> is_interleaved(interleaved);
+
     sycl::event reduce_event = q->submit([&](sycl::handler& cgh) {
       cgh.parallel_for(sycl::nd_range<1>(global_size, local_size), [=](sycl::nd_item<1> it) {
         const std::size_t gid = it.get_global_linear_id();
         const std::size_t gsize = it.get_global_range().size();
 
-        // The two loops differ only in how rows are distributed; the body is
-        // repeated rather than hoisted into a lambda or a runtime stride so
-        // that the chunked variant keeps its literal stride of 1 (which is
-        // what lets the CPU backends vectorize it).
+        // The two loops differ only in how rows are distributed; since is_interlaved is
+        // of type sycl::specialized, AdaptiveCpp's JIT compiler will optimise the branch
+        // away at JIT compile time.
         T sum[bs * bs] = {0};
-        if (interleaved) {
-          // GPU: consecutive work-items take consecutive rows, so the loads of
-          // a sub-group cover one contiguous bs * sizeof(T) * sub_group_size
-          // span and coalesce into full transactions.
+        if (is_interleaved) {
+          // GPU: consecutive work-items take consecutive rows (so the loads will
+          // be coalesced)
           for (std::size_t i = gid; i < n; i += gsize)
             for (unsigned int I = 0; I < bs; ++I)
               for (unsigned int J = 0; J < bs; ++J) sum[I * bs + J] += a[i * bs + I] * b[i * bs + J];
         }
         else {
-          // CPU: one contiguous, prefetchable chunk of rows per work-item.
+          // CPU: individual work items take consecutive rows
           const std::size_t chunk = (n + gsize - 1) / gsize;
           const std::size_t begin = sycl::min(gid * chunk, n);
           const std::size_t end = sycl::min(begin + chunk, n);
@@ -172,25 +177,72 @@ public:
               sycl::atomic_ref<double, sycl::memory_order::relaxed, sycl::memory_scope::device> c_ref(c[I * bs + J]);
               c_ref += reduced_sums[I * bs + J];
             }
-          // s[group_id * bs * bs + I * bs + J] = reduced_sums[I * bs + J];
         }
       });
     });
     if (events) events->push_back(reduce_event);
-
-    // sycl::event finalize_event = q->single_task([=]() {
-    //   for (unsigned int I = 0; I < bs; ++I)
-    //     for (unsigned int J = 0; J < bs; ++J) c[I * bs + J] = 0;
-
-    //   for (std::size_t i = 0; i < launch_.num_groups; ++i) {
-    //     for (unsigned int I = 0; I < bs; ++I)
-    //       for (unsigned int J = 0; J < bs; ++J) c[I * bs + J] += s[i * bs * bs + I * bs + J];
-    //   }
-    // });
-    // if (events) events->push_back(finalize_event);
   }
 
-  void subtract_product(PanelView Y, DenseMatrix<T>& M) { TRL_TODO("PanelView::subtract_product"); }
+  /** @brief Computes this -= Y * M (or this -= Y * M^T for TransposeMode::Transpose),
+   *  the fused form of mult + subtract.
+   *
+   *  @p M is (Y.cols() x cols()) row-major for NoTranspose and
+   *  (cols() x Y.cols()) row-major for TransposeMode::Transpose, i.e. the
+   *  transpose factor itself is stored rather than computed -- the same
+   *  conventions as mult. Avoids both the temporary output panel and the extra
+   *  read pass that calling mult into scratch storage and subtracting would
+   *  cost: each row of this is read and written exactly once. If @p events is
+   *  given, the event of the submitted kernel is appended to it, as in mult.
+   */
+  void subtract_product(TransposeMode t, PanelView Y, DenseMatrix<T>& M, std::vector<sycl::event>* events = nullptr)
+  {
+    TRL_CHECK(rows() == Y.rows(), "This panel and the input panel must have the same number of rows");
+    if (t == TransposeMode::NoTranspose) {
+      TRL_CHECK(Y.cols() == M.rows(), "Number of columns of the input panel must match number of rows of matrix");
+      TRL_CHECK(M.cols() == cols(), "Number of columns of matrix must match number of columns of this panel");
+    }
+    else {
+      TRL_CHECK(cols() == M.rows(), "For TransposeMode::Transpose the matrix must be stored as (cols() x Y.cols())");
+      TRL_CHECK(M.cols() == Y.cols(), "For TransposeMode::Transpose the number of columns of the matrix must match the number of columns of the input panel");
+    }
+
+    const T* a = Y.data();
+    T* c = data();
+    const T* b = M.data();
+    const auto in_blocks = Y.count_;
+    const auto out_blocks = count_;
+    const auto n = rows();
+    const auto ldb = M.cols(); // M is row-major, so its row stride is its column count
+
+    sycl::specialized<bool> tp = (t == TransposeMode::Transpose);
+
+    sycl::event subtract_event = q->submit([&](sycl::handler& cgh) {
+      cgh.parallel_for(sycl::range<1>(n), [=](sycl::id<1> id) {
+        auto tid = id[0];
+
+        for (unsigned int Bo = 0; Bo < out_blocks; ++Bo) {
+          T c_private[bs];
+          for (unsigned int i = 0; i < bs; ++i) c_private[i] = T{0};
+
+          for (unsigned int Bi = 0; Bi < in_blocks; ++Bi) {
+            const T* a_base = a + Bi * n * bs;
+
+            T a_private[bs];
+            for (unsigned int j = 0; j < bs; ++j) a_private[j] = a_base[tid * bs + j];
+
+            for (unsigned int i = 0; i < bs; ++i)
+              for (unsigned int j = 0; j < bs; ++j)
+                if (tp) c_private[i] += a_private[j] * b[(Bo * bs + i) * ldb + (Bi * bs + j)];
+                else c_private[i] += a_private[j] * b[(Bi * bs + j) * ldb + (Bo * bs + i)];
+          }
+
+          T* c_base = c + Bo * n * bs;
+          for (unsigned int i = 0; i < bs; ++i) c_base[tid * bs + i] -= c_private[i];
+        }
+      });
+    });
+    if (events) events->push_back(subtract_event);
+  }
 
   T* data() { return start_; }
 
